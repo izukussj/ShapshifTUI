@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://moltui.dev/schemas/event.json",
+  "title": "Event",
+  "description": "A serialized user interaction sent from MoltUI to AI backend",
+  "type": "object",
+  "required": ["jsonrpc", "method", "params"],
+  "properties": {
+    "jsonrpc": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "method": {
+      "type": "string",
+      "const": "event"
+    },
+    "id": {
+      "type": "string",
+      "description": "Request ID for events expecting response"
+    },
+    "params": {
+      "type": "object",
+      "required": ["sessionId", "layoutId", "widgetId", "eventType", "data", "timestamp"],
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "description": "Current session identifier"
+        },
+        "layoutId": {
+          "type": "string",
+          "description": "Current layout identifier"
+        },
+        "widgetId": {
+          "type": "string",
+          "description": "Widget that triggered the event"
+        },
+        "eventType": {
+          "type": "string",
+          "enum": [
+            "click",
+            "dblclick",
+            "mouseover",
+            "mouseout",
+            "mousewheel",
+            "keypress",
+            "focus",
+            "blur",
+            "select",
+            "change",
+            "submit",
+            "cancel",
+            "resize",
+            "scroll"
+          ]
+        },
+        "data": {
+          "type": "object",
+          "description": "Event-specific data"
+        },
+        "timestamp": {
+          "type": "number",
+          "description": "Unix timestamp in milliseconds"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "ClickEventData": {
+      "type": "object",
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "button": {
+          "type": "string",
+          "enum": ["left", "right", "middle"]
+        }
+      }
+    },
+    "KeypressEventData": {
+      "type": "object",
+      "properties": {
+        "key": { "type": "string" },
+        "ctrl": { "type": "boolean" },
+        "shift": { "type": "boolean" },
+        "meta": { "type": "boolean" },
+        "alt": { "type": "boolean" }
+      }
+    },
+    "SelectEventData": {
+      "type": "object",
+      "properties": {
+        "rowIndex": { "type": "number" },
+        "rowId": { "type": "string" },
+        "rowData": { "type": "object" },
+        "selectedItems": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "ChangeEventData": {
+      "type": "object",
+      "properties": {
+        "fieldId": { "type": "string" },
+        "value": {},
+        "previousValue": {}
+      }
+    },
+    "SubmitEventData": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "ScrollEventData": {
+      "type": "object",
+      "properties": {
+        "scrollTop": { "type": "number" },
+        "scrollLeft": { "type": "number" },
+        "direction": {
+          "type": "string",
+          "enum": ["up", "down", "left", "right"]
+        }
+      }
+    },
+    "ResizeEventData": {
+      "type": "object",
+      "properties": {
+        "width": { "type": "number" },
+        "height": { "type": "number" }
+      }
+    }
+  }
+}
