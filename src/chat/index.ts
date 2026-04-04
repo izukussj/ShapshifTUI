@@ -5,3 +5,4 @@
  */
 
 export { ChatPanel, type ChatPanelConfig } from './chat-panel.js';
+export { MessageParser, getMessageParser } from './message-parser.js';

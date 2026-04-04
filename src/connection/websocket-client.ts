@@ -12,6 +12,7 @@ import type {
   LayoutPatchParams,
   MessageParams,
   HistoryParams,
+  InteractionContext,
 } from '../types/index.js';
 import { JsonRpcErrorCodes } from '../types/index.js';
 
@@ -184,17 +185,27 @@ export class WebSocketClient extends EventEmitter {
   }
 
   /**
-   * Send a chat message
+   * Send a chat message with optional interaction context
+   *
+   * @param content - The message content
+   * @param interactionContext - Optional interaction context from TUI
    */
-  sendChat(content: string): void {
+  sendChat(content: string, interactionContext?: InteractionContext): void {
     if (!this.sessionId) {
       throw new Error('No active session');
     }
 
-    this.notify('chat', {
+    const params: Record<string, unknown> = {
       sessionId: this.sessionId,
       content,
-    });
+    };
+
+    // Include interaction context if provided (backwards compatible)
+    if (interactionContext && interactionContext.events.length > 0) {
+      params.interactionContext = interactionContext;
+    }
+
+    this.notify('chat', params);
   }
 
   /**

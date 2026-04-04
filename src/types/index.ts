@@ -120,3 +120,17 @@ export type {
 } from './protocol.js';
 
 export { JsonRpcErrorCodes } from './protocol.js';
+
+// Interaction types
+export type {
+  InteractionElementType,
+  InteractionEventType,
+  InteractionData,
+  InteractionEvent,
+  InteractionHistoryState,
+  InteractionContext,
+  WidgetInteractionEvent,
+} from './interaction.js';
+
+// Parsed response types
+export type { ParsedResponse } from './parsed-response.js';

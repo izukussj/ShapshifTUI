@@ -2,6 +2,7 @@ import blessed from 'blessed';
 import type { Message, MessageSender } from '../types/index.js';
 import { getEventBus } from '../events/index.js';
 import { getThemeManager } from '../theme/index.js';
+import { getMessageParser } from './message-parser.js';
 
 /**
  * Chat panel configuration
@@ -22,6 +23,7 @@ export class ChatPanel {
   private config: ChatPanelConfig;
   private eventBus = getEventBus();
   private themeManager = getThemeManager();
+  private messageParser = getMessageParser();
   private screen: blessed.Widgets.Screen | null = null;
 
   constructor(config: ChatPanelConfig) {
@@ -141,10 +143,36 @@ export class ChatPanel {
   }
 
   /**
-   * Add a new message
+   * Add a new message or update an existing one (for streaming)
+   * For AI messages, parses content to strip code blocks and extract layouts
    */
   addMessage(message: Message): void {
-    this.messages.push(message);
+    // For AI messages, parse to separate text from layout
+    let displayMessage = message;
+    if (message.sender === 'ai') {
+      const parsed = this.messageParser.parse(message.content);
+
+      // Create a display message with only the text content
+      displayMessage = {
+        ...message,
+        content: parsed.text || '(Interface updated)',
+      };
+
+      // If a layout was found and message is complete, emit layout event
+      if (parsed.hasLayout && parsed.layout && message.status === 'sent') {
+        this.eventBus.emit('chat:layout', parsed.layout);
+      }
+    }
+
+    // Check if this is an update to an existing message (same ID)
+    const existingIndex = this.messages.findIndex((m) => m.id === displayMessage.id);
+    if (existingIndex >= 0) {
+      // Update existing message
+      this.messages[existingIndex] = displayMessage;
+    } else {
+      // Add new message
+      this.messages.push(displayMessage);
+    }
     this.renderMessages();
     this.scrollToBottom();
   }
@@ -167,10 +195,13 @@ export class ChatPanel {
   }
 
   /**
-   * Focus the input field
+   * Focus the input field and enter input mode
    */
   focusInput(): void {
-    this.input?.focus();
+    if (this.input) {
+      this.input.focus();
+      this.input.readInput();
+    }
   }
 
   /**

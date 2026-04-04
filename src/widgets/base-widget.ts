@@ -99,13 +99,11 @@ export abstract class BaseWidget {
 
     const options: Record<string, unknown> = {};
 
-    // Position
-    if (layout.position === 'absolute') {
-      if (layout.top !== undefined) options.top = layout.top;
-      if (layout.left !== undefined) options.left = layout.left;
-      if (layout.right !== undefined) options.right = layout.right;
-      if (layout.bottom !== undefined) options.bottom = layout.bottom;
-    }
+    // Position - always apply if provided (blessed handles positioning)
+    if (layout.top !== undefined) options.top = layout.top;
+    if (layout.left !== undefined) options.left = layout.left;
+    if (layout.right !== undefined) options.right = layout.right;
+    if (layout.bottom !== undefined) options.bottom = layout.bottom;
 
     // Size
     if (layout.width !== undefined) options.width = layout.width;
@@ -200,6 +198,25 @@ export abstract class BaseWidget {
       // Simple condition evaluation (expand as needed)
       // For now, just skip if condition is truthy string
     }
+
+    // Always emit widget:interaction for the interaction capture system
+    // This is separate from widget:event which is for backend communication
+    const props = this.definition.props as Record<string, unknown> | undefined;
+    const actionData = action.data as Record<string, unknown> | undefined;
+
+    this.eventBus.emit('widget:interaction', {
+      layoutId: context.layoutId,
+      widgetId: this.definition.id,
+      widgetType: this.definition.type,
+      eventType: handler.on,
+      data: {
+        label: (actionData?.label as string) || (props?.content as string) || (props?.label as string),
+        value: actionData?.value,
+        previousValue: actionData?.previousValue,
+        index: actionData?.index as number | undefined,
+      },
+      timestamp: Date.now(),
+    });
 
     switch (action.type) {
       case 'emit':

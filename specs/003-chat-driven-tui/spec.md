@@ -123,9 +123,58 @@ As a user, I want to seamlessly switch focus between the chat panel and the gene
 - Q: Should chat history persist across application restarts, and if so, for how long? → A: Persist to local file, load on restart
 - Q: How should the system handle backend disconnections? → A: Auto-reconnect with exponential backoff (3 attempts), then prompt user
 
+## Backend Architecture
+
+The system supports multiple backend modes to accommodate different use cases:
+
+### 1. Mock Mode (`npm run mock-server`)
+
+Built-in mock server for testing and development. Uses the MoltUI JSON-RPC protocol directly.
+
+```
+┌─────────────┐      MoltUI Protocol      ┌──────────────┐
+│  MoltUI App │ ───────────────────────→  │ Mock Server  │
+└─────────────┘    {jsonrpc, method}      └──────────────┘
+```
+
+- **Start**: `npm run mock-server`
+- **Connect**: `npm run demo` (connects to ws://localhost:8080)
+- **Use case**: Development, testing, demos without AI
+
+### 2. Bridge Mode (`npm run bridge`)
+
+Translates between MoltUI JSON-RPC protocol and chatgpt-websocket protocol. Allows using the existing chatgpt-websocket backend with MoltUI.
+
+```
+┌─────────────┐    MoltUI     ┌────────┐   chatgpt    ┌──────────────────┐
+│  MoltUI App │ ───────────→  │ Bridge │ ──────────→  │ chatgpt-websocket │
+└─────────────┘   Protocol    │ Server │   Protocol   └──────────────────┘
+```
+
+**chatgpt-websocket protocol**:
+- Send: `{"type":"chat","message":"your message here"}`
+- Receive: Streaming text chunks, then `{"type":"end"}` or `END`
+
+**Start sequence**:
+1. Start chatgpt-websocket: `TOKEN=... npx chatgpt-websocket token=$TOKEN port=8181`
+2. Start bridge: `npm run bridge`
+3. Run MoltUI: `npm run demo`
+
+### 3. Direct Mode (future)
+
+Direct OpenAI/Anthropic API calls without WebSocket intermediary. Single process, simpler deployment.
+
+```
+┌─────────────┐    Direct API calls    ┌─────────────┐
+│  MoltUI App │ ────────────────────→  │ OpenAI API  │
+└─────────────┘   (openai npm package) └─────────────┘
+```
+
+**Deferred to future implementation.**
+
 ## Assumptions
 
 - Users have a terminal that supports TUI rendering (blessed-compatible).
-- The AI backend (chatgpt-websocket) is running and accessible.
+- The AI backend (chatgpt-websocket) is running and accessible (for Bridge Mode).
 - Users understand basic natural language to describe interfaces.
 - Terminal size is at least 80x24 characters.

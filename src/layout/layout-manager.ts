@@ -53,22 +53,29 @@ export class LayoutManager {
    * Handle incoming layout from backend
    */
   handleLayout(layout: LayoutDefinition): ValidationResult {
+    process.stderr.write(`[LM] handleLayout: ${layout.id}\n`);
+
     // Validate the layout
     const validation = validateLayout(layout);
     if (!validation.valid) {
+      process.stderr.write(`[LM] validation failed: ${JSON.stringify(validation.errors)}\n`);
       this.eventBus.emit('layout:error', new Error(
         `Invalid layout: ${validation.errors.map(e => e.message).join(', ')}`
       ));
       return validation;
     }
 
+    process.stderr.write(`[LM] valid, isUserInteracting: ${this.isUserInteracting}\n`);
+
     // If user is interacting, queue the layout
     if (this.isUserInteracting) {
+      process.stderr.write(`[LM] queueing layout\n`);
       this.queueLayout(layout);
       return validation;
     }
 
     // Apply immediately
+    process.stderr.write(`[LM] applying immediately\n`);
     this.applyLayout(layout);
     return validation;
   }
@@ -150,14 +157,17 @@ export class LayoutManager {
    * Apply a layout
    */
   private applyLayout(layout: LayoutDefinition): void {
+    process.stderr.write(`[LM] applyLayout: ${layout.id}\n`);
     this.currentLayout = layout;
 
     // Update theme manager with layout overrides
     const themeManager = getThemeManager();
     themeManager.setOverrides(layout.theme);
 
+    process.stderr.write(`[LM] emitting events\n`);
     this.eventBus.emit('layout:received', layout);
     this.eventBus.emit('layout:applied', layout.id);
+    process.stderr.write(`[LM] events emitted\n`);
   }
 
   /**

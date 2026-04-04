@@ -19,6 +19,7 @@
     "dev": "tsup --watch",
     "start": "node dist/cli.js",
     "mock-server": "node mock-server/server.js",
+    "bridge": "node mock-server/bridge.js",
     "llm-backend": "node mock-server/llm-backend.js",
     "manual": "node mock-server/manual-backend.js",
     "demo": "node dist/cli.js ws://localhost:8080",

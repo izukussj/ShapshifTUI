@@ -5,6 +5,8 @@ import type {
   LayoutDefinition,
   Message,
   SessionState,
+  InteractionEvent,
+  WidgetInteractionEvent,
 } from '../types/index.js';
 
 /**
@@ -31,6 +33,7 @@ export interface AppEvents {
   'chat:history': (messages: Message[]) => void;
   'chat:send': (content: string) => void;
   'chat:submit': () => void;
+  'chat:layout': (layout: LayoutDefinition) => void;
 
   // User interaction
   'user:interacting': (isInteracting: boolean) => void;
@@ -39,6 +42,15 @@ export interface AppEvents {
   // Terminal events
   'terminal:resize': (width: number, height: number) => void;
   'terminal:key': (key: string, ctrl: boolean, meta: boolean, shift: boolean) => void;
+
+  // TUI render events
+  'tui:render:success': (params: { layoutId: string; widgetCount: number; renderTimeMs: number }) => void;
+  'tui:render:error': (params: { layoutId: string; error: string; preservedLayoutId: string | null }) => void;
+
+  // Interaction events
+  'widget:interaction': (event: WidgetInteractionEvent) => void;
+  'interaction:captured': (params: { event: InteractionEvent; historySize: number; wasDebounced: boolean }) => void;
+  'interaction:debounced': (params: { widgetId: string; eventType: string; timeSinceLastMs: number }) => void;
 }
 
 /**
