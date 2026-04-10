@@ -1,27 +1,23 @@
 import { defineConfig } from 'tsup';
 
 export default defineConfig([
-  // CLI build
   {
-    entry: ['src/cli.ts'],
+    entry: { cli: 'src/cli.tsx' },
     format: ['esm'],
-    dts: false,
     sourcemap: true,
     clean: true,
-    target: 'node18',
+    target: 'node20',
     outDir: 'dist',
-    external: ['blessed', 'blessed-contrib', 'ws', 'ajv', 'fast-json-patch'],
-    // Shebang is handled by the source file itself
+    external: ['react', 'ink', 'ink-text-input', 'esbuild', 'ws'],
+    banner: { js: '#!/usr/bin/env node' },
   },
-  // Library build
   {
-    entry: ['src/index.ts'],
+    entry: { sandbox: 'src/sandbox.ts' },
     format: ['esm'],
-    dts: true,
     sourcemap: true,
     clean: false,
-    target: 'node18',
+    target: 'node20',
     outDir: 'dist',
-    external: ['blessed', 'blessed-contrib', 'ws', 'ajv', 'fast-json-patch'],
+    external: ['react', 'ink', 'ink-text-input', 'esbuild'],
   },
 ]);

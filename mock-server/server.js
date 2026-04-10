@@ -1,364 +1,185 @@
 #!/usr/bin/env node
+/**
+ * Mock backend for shapeshiftui. Speaks the v2 wire protocol — plain JSON frames,
+ * no JSON-RPC, no handshake. Auto-responds to keywords with canned shapeshiftui
+ * code blocks. Echoes interaction context so you can verify the loop.
+ */
 
 import { WebSocketServer } from 'ws';
 
 const PORT = process.env.PORT || 8080;
-
 const wss = new WebSocketServer({ port: PORT });
 
-console.log(`Mock MoltUI backend running on ws://localhost:${PORT}`);
+console.log(`shapeshiftui mock backend on ws://localhost:${PORT}`);
 
-// Sample layouts to demonstrate different widget types
-const sampleLayouts = {
-  welcome: {
-    version: '1.0',
-    id: 'welcome-layout',
-    type: 'single',
-    root: {
-      id: 'root',
-      type: 'container',
-      layout: { flexDirection: 'column', padding: 1 },
-      children: [
-        {
-          id: 'header',
-          type: 'text',
-          props: { content: '{bold}{cyan-fg}Welcome to MoltUI!{/cyan-fg}{/bold}' },
-          layout: { height: 1 },
-        },
-        {
-          id: 'info',
-          type: 'panel',
-          props: { title: 'Getting Started' },
-          layout: { height: 10 },
-          children: [
-            {
-              id: 'info-text',
-              type: 'text',
-              props: {
-                content: 'This is a demo of MoltUI - a chat-integrated TUI framework.\n\nTry these commands:\n  • "show dashboard" - Display a dashboard layout\n  • "show form" - Display a form\n  • "show table" - Display a data table\n  • "hello" - Get a greeting',
-              },
-            },
-          ],
-        },
-        {
-          id: 'status',
-          type: 'text',
-          props: { content: '{gray-fg}Type a message in the chat panel to interact{/gray-fg}' },
-          layout: { height: 1 },
-        },
-      ],
-    },
-  },
+// Component contract:
+//   - props: { sendEvent, context }
+//   - bare identifiers from the runtime globals: React, useState, useEffect,
+//     useRef, useMemo, useCallback, useReducer, Box, Text, Newline, Spacer,
+//     Static, Transform, useFocus, useFocusManager, useInput, TextInput, Button
+const layouts = {
+  form: `({ sendEvent, submitEvent }) => {
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [focus, setFocus] = useState('name');
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Text bold color="cyan">Sign up</Text>
+      <Box flexDirection="column">
+        <Text>Name:</Text>
+        <TextInput value={name} onChange={(v) => { setName(v); sendEvent('change', { field: 'name', value: v }); }} focus={focus === 'name'} onSubmit={() => setFocus('email')} />
+      </Box>
+      <Box flexDirection="column">
+        <Text>Email:</Text>
+        <TextInput value={email} onChange={(v) => { setEmail(v); sendEvent('change', { field: 'email', value: v }); }} focus={focus === 'email'} onSubmit={() => setFocus('submit')} />
+      </Box>
+      <Button label="Submit" onPress={() => submitEvent('submit', { name, email })} />
+      <Text dimColor>Enter on each input to advance.</Text>
+    </Box>
+  );
+}`,
 
-  dashboard: {
-    version: '1.0',
-    id: 'dashboard-layout',
-    type: 'split',
-    root: {
-      id: 'root',
-      type: 'container',
-      layout: { flexDirection: 'column' },
-      children: [
-        {
-          id: 'header',
-          type: 'text',
-          props: { content: '{bold}{blue-fg}Dashboard{/blue-fg}{/bold}' },
-          layout: { height: 1 },
-          style: { bg: 'blue', fg: 'white' },
-        },
-        {
-          id: 'main',
-          type: 'container',
-          layout: { flexDirection: 'row', flexGrow: 1 },
-          children: [
-            {
-              id: 'stats-panel',
-              type: 'panel',
-              props: { title: 'Statistics' },
-              layout: { width: '50%' },
-              children: [
-                {
-                  id: 'stats',
-                  type: 'text',
-                  props: {
-                    content: '{green-fg}Active Users:{/green-fg} 1,234\n{yellow-fg}Sessions:{/yellow-fg} 5,678\n{cyan-fg}Requests/min:{/cyan-fg} 890\n{red-fg}Errors:{/red-fg} 12',
-                  },
-                },
-              ],
-            },
-            {
-              id: 'actions-panel',
-              type: 'panel',
-              props: { title: 'Quick Actions' },
-              layout: { width: '50%' },
-              children: [
-                {
-                  id: 'btn-refresh',
-                  type: 'button',
-                  props: { label: '[ Refresh Data ]' },
-                  layout: { height: 3 },
-                  events: [{ on: 'click', action: { type: 'emit', data: { action: 'refresh' } } }],
-                },
-                {
-                  id: 'btn-export',
-                  type: 'button',
-                  props: { label: '[ Export Report ]' },
-                  layout: { height: 3, top: 4 },
-                  events: [{ on: 'click', action: { type: 'emit', data: { action: 'export' } } }],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  },
+  counter: `({ sendEvent }) => {
+  const [count, setCount] = useState(0);
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Text bold color="green">Counter: {count}</Text>
+      <Box gap={1}>
+        <Button label="-" onPress={() => { const n = count - 1; setCount(n); sendEvent('decrement', { count: n }); }} />
+        <Button label="+" onPress={() => { const n = count + 1; setCount(n); sendEvent('increment', { count: n }); }} />
+        <Button label="reset" onPress={() => { setCount(0); sendEvent('reset', { count: 0 }); }} />
+      </Box>
+    </Box>
+  );
+}`,
 
-  form: {
-    version: '1.0',
-    id: 'form-layout',
-    type: 'single',
-    root: {
-      id: 'root',
-      type: 'panel',
-      props: { title: 'User Registration' },
-      layout: { padding: 1 },
-      children: [
-        {
-          id: 'form-container',
-          type: 'container',
-          layout: { flexDirection: 'column', gap: 1 },
-          children: [
-            {
-              id: 'name-label',
-              type: 'text',
-              props: { content: 'Name:' },
-              layout: { height: 1 },
-            },
-            {
-              id: 'name-field',
-              type: 'text',
-              props: { content: '[_______________]' },
-              layout: { height: 1 },
-              style: { fg: 'cyan' },
-            },
-            {
-              id: 'email-label',
-              type: 'text',
-              props: { content: 'Email:' },
-              layout: { height: 1 },
-            },
-            {
-              id: 'email-field',
-              type: 'text',
-              props: { content: '[_______________]' },
-              layout: { height: 1 },
-              style: { fg: 'cyan' },
-            },
-            {
-              id: 'submit-btn',
-              type: 'button',
-              props: { label: '[ Submit ]' },
-              layout: { height: 3, width: 14 },
-              events: [{ on: 'click', action: { type: 'emit', data: { action: 'submit' } } }],
-            },
-          ],
-        },
-      ],
-    },
-  },
-
-  table: {
-    version: '1.0',
-    id: 'table-layout',
-    type: 'single',
-    root: {
-      id: 'root',
-      type: 'panel',
-      props: { title: 'User Data' },
-      children: [
-        {
-          id: 'table-display',
-          type: 'container',
-          layout: { flexDirection: 'column' },
-          children: [
-            {
-              id: 'table-header',
-              type: 'text',
-              props: { content: '{bold}ID    Name           Email                  Status{/bold}' },
-              layout: { height: 1 },
-              style: { fg: 'yellow' },
-            },
-            {
-              id: 'table-sep',
-              type: 'text',
-              props: { content: '─'.repeat(55) },
-              layout: { height: 1 },
-              style: { fg: 'gray' },
-            },
-            {
-              id: 'row-1',
-              type: 'text',
-              props: { content: '001   Alice Smith     alice@example.com      {green-fg}Active{/green-fg}' },
-              layout: { height: 1 },
-            },
-            {
-              id: 'row-2',
-              type: 'text',
-              props: { content: '002   Bob Johnson     bob@example.com        {green-fg}Active{/green-fg}' },
-              layout: { height: 1 },
-            },
-            {
-              id: 'row-3',
-              type: 'text',
-              props: { content: '003   Carol White     carol@example.com      {yellow-fg}Pending{/yellow-fg}' },
-              layout: { height: 1 },
-            },
-            {
-              id: 'row-4',
-              type: 'text',
-              props: { content: '004   David Brown     david@example.com      {red-fg}Inactive{/red-fg}' },
-              layout: { height: 1 },
-            },
-            {
-              id: 'row-5',
-              type: 'text',
-              props: { content: '005   Eve Wilson      eve@example.com        {green-fg}Active{/green-fg}' },
-              layout: { height: 1 },
-            },
-          ],
-        },
-      ],
-    },
-  },
+  dashboard: `({ context }) => {
+  const recent = context.events.slice(-5);
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Text bold color="magenta">Dashboard</Text>
+      <Box flexDirection="row" gap={2}>
+        <Box borderStyle="single" padding={1} flexDirection="column">
+          <Text dimColor>Active</Text>
+          <Text bold color="green">1,234</Text>
+        </Box>
+        <Box borderStyle="single" padding={1} flexDirection="column">
+          <Text dimColor>Sessions</Text>
+          <Text bold color="yellow">5,678</Text>
+        </Box>
+        <Box borderStyle="single" padding={1} flexDirection="column">
+          <Text dimColor>Errors</Text>
+          <Text bold color="red">12</Text>
+        </Box>
+      </Box>
+      <Text dimColor>Recent events: {recent.length}</Text>
+      {recent.map((e, i) => <Text key={i} dimColor>  - {e.eventType}</Text>)}
+    </Box>
+  );
+}`,
 };
 
-// Message responses
-const responses = {
-  hello: "Hello! I'm your AI assistant. How can I help you today?",
-  help: "Available commands:\n• show dashboard\n• show form\n• show table\n• hello\n• help",
-  default: "I received your message. Try 'show dashboard', 'show form', 'show table', or 'help' for available commands.",
-};
-
-wss.on('connection', (ws) => {
-  console.log('Client connected');
-
-  let sessionId = null;
-
-  ws.on('message', (data) => {
-    try {
-      const message = JSON.parse(data.toString());
-      console.log('Received:', JSON.stringify(message, null, 2));
-
-      // Handle init request
-      if (message.method === 'init') {
-        sessionId = `session-${Date.now()}`;
-
-        // Send init response
-        ws.send(JSON.stringify({
-          jsonrpc: '2.0',
-          result: { sessionId, serverVersion: '1.0.0' },
-          id: message.id,
-        }));
-
-        // Send welcome message after a short delay
-        setTimeout(() => {
-          sendMessage(ws, sessionId, 'ai', 'Welcome to MoltUI! Type "help" for available commands.');
-          sendLayout(ws, sessionId, sampleLayouts.welcome);
-        }, 500);
-
-        return;
-      }
-
-      // Handle chat messages
-      if (message.method === 'chat') {
-        const content = message.params?.content?.toLowerCase() || '';
-
-        // Echo user message status update
-        setTimeout(() => {
-          // Process command
-          if (content.includes('show dashboard')) {
-            sendMessage(ws, sessionId, 'ai', 'Here\'s the dashboard layout:');
-            sendLayout(ws, sessionId, sampleLayouts.dashboard);
-          } else if (content.includes('show form')) {
-            sendMessage(ws, sessionId, 'ai', 'Here\'s a sample form:');
-            sendLayout(ws, sessionId, sampleLayouts.form);
-          } else if (content.includes('show table')) {
-            sendMessage(ws, sessionId, 'ai', 'Here\'s the user data table:');
-            sendLayout(ws, sessionId, sampleLayouts.table);
-          } else if (content.includes('hello') || content.includes('hi')) {
-            sendMessage(ws, sessionId, 'ai', responses.hello);
-          } else if (content.includes('help')) {
-            sendMessage(ws, sessionId, 'ai', responses.help);
-          } else {
-            sendMessage(ws, sessionId, 'ai', responses.default);
-          }
-        }, 300);
-
-        return;
-      }
-
-      // Handle events
-      if (message.method === 'event') {
-        const { widgetId, eventType, data } = message.params || {};
-        console.log(`Event: ${eventType} on ${widgetId}`, data);
-
-        if (data?.action === 'refresh') {
-          sendMessage(ws, sessionId, 'ai', 'Data refreshed! (simulated)');
-        } else if (data?.action === 'export') {
-          sendMessage(ws, sessionId, 'ai', 'Report exported to /tmp/report.csv (simulated)');
-        } else if (data?.action === 'submit') {
-          sendMessage(ws, sessionId, 'ai', 'Form submitted successfully! (simulated)');
-        }
-
-        return;
-      }
-
-    } catch (error) {
-      console.error('Error processing message:', error);
-    }
-  });
-
-  ws.on('close', () => {
-    console.log('Client disconnected');
-  });
-
-  ws.on('error', (error) => {
-    console.error('WebSocket error:', error);
-  });
-});
-
-function sendMessage(ws, sessionId, sender, content) {
-  ws.send(JSON.stringify({
-    jsonrpc: '2.0',
-    method: 'message',
-    params: {
-      sessionId,
+function send(ws, sender, content) {
+  ws.send(
+    JSON.stringify({
+      type: 'message',
       message: {
-        id: `msg-${Date.now()}`,
+        id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         sender,
         content,
         timestamp: Date.now(),
-        status: 'sent',
       },
-    },
-  }));
+    })
+  );
 }
 
-function sendLayout(ws, sessionId, layout) {
-  ws.send(JSON.stringify({
-    jsonrpc: '2.0',
-    method: 'layout',
-    params: {
-      sessionId,
-      layout,
-    },
-  }));
+function reply(ws, content, code) {
+  const body = code ? `${content}\n\n\`\`\`shapeshiftui\n${code}\n\`\`\`` : content;
+  send(ws, 'ai', body);
 }
 
-// Handle graceful shutdown
+wss.on('connection', (ws) => {
+  console.log('client connected');
+  send(ws, 'ai', 'Connected. Try: "form", "counter", "dashboard", or "what did I do?"');
+
+  ws.on('message', (raw) => {
+    let msg;
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch {
+      return;
+    }
+
+    // Handle real-time component events
+    if (msg.type === 'event') {
+      const { eventType, data } = msg;
+      if (eventType === 'submit' && data) {
+        const d = data;
+        reply(
+          ws,
+          `Got your signup! Name: ${d.name || '?'}, Email: ${d.email || '?'}`,
+          `() => {
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Text bold color="green">Success!</Text>
+      <Text>Welcome aboard, ${d.name || 'friend'}.</Text>
+      <Text dimColor>Confirmation sent to ${d.email || 'your email'}.</Text>
+    </Box>
+  );
+}`
+        );
+      } else if (eventType === 'increment' || eventType === 'decrement' || eventType === 'reset') {
+        const count = data?.count ?? 0;
+        reply(ws, `Counter is now ${count}.`);
+      } else {
+        reply(ws, `Received event: ${eventType} ${JSON.stringify(data ?? {})}`);
+      }
+      return;
+    }
+
+    if (msg.type !== 'chat') return;
+
+    const text = (msg.content || '').toLowerCase();
+    const interactions = msg.interactions || [];
+
+    if (text.includes('form')) {
+      reply(ws, 'Here is a signup form:', layouts.form);
+      return;
+    }
+    if (text.includes('counter')) {
+      reply(ws, 'A counter for you:', layouts.counter);
+      return;
+    }
+    if (text.includes('dashboard')) {
+      reply(ws, 'Live dashboard (reflects your recent events):', layouts.dashboard);
+      return;
+    }
+
+    // Interaction-context echo: prove the loop works.
+    if (text.includes('what') || text.includes('did i')) {
+      if (interactions.length === 0) {
+        reply(ws, "You haven't interacted with anything yet. Try 'counter' and click + a few times.");
+      } else {
+        const summary = interactions
+          .slice(-5)
+          .map((e) => `  - ${e.eventType} ${JSON.stringify(e.data ?? {})}`)
+          .join('\n');
+        reply(ws, `Last ${Math.min(5, interactions.length)} events I see:\n${summary}`);
+      }
+      return;
+    }
+
+    reply(
+      ws,
+      `Got "${msg.content}" with ${interactions.length} prior interaction(s). Try: form, counter, dashboard, what did I do?`
+    );
+  });
+
+  ws.on('close', () => console.log('client disconnected'));
+});
+
 process.on('SIGINT', () => {
-  console.log('\nShutting down...');
+  console.log('\nshutting down');
   wss.close();
   process.exit(0);
 });

@@ -44,6 +44,7 @@ export class TableWidget extends BaseWidget {
       mouse: true,
       keys: true,
       vi: true,
+      clickable: true,
       interactive: !!selectable,
       border: { type: 'line' },
       align: 'left',

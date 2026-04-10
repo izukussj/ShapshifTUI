@@ -28,6 +28,7 @@ export class ButtonWidget extends BaseWidget {
       align: props?.align || 'center',
       mouse: true,
       keys: true,
+      clickable: true,
       shrink: true,
       ...this.getLayoutOptions(layout),
       style: {

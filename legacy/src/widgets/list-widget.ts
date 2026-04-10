@@ -39,6 +39,7 @@ export class ListWidget extends BaseWidget {
       mouse: true,
       keys: true,
       vi: true,
+      clickable: true,
       interactive: props?.selectable !== false,
       selected: props?.selected || 0,
       ...this.getLayoutOptions(layout),

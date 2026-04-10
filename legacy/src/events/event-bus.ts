@@ -35,6 +35,10 @@ export interface AppEvents {
   'chat:submit': () => void;
   'chat:layout': (layout: LayoutDefinition) => void;
 
+  // Focus events
+  'ui:focus:layout': () => void;
+  'ui:focus:chat': () => void;
+
   // User interaction
   'user:interacting': (isInteracting: boolean) => void;
   'user:submit': () => void;

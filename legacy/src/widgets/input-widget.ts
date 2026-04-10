@@ -54,6 +54,7 @@ export class InputWidget extends BaseWidget {
       inputOnFocus: true,
       mouse: true,
       keys: true,
+      clickable: true,
       value: props?.value || '',
       censor: props?.password,
       style: {

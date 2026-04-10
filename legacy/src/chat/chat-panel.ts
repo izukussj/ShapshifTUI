@@ -118,6 +118,7 @@ export class ChatPanel {
       inputOnFocus: true,
       mouse: true,
       keys: true,
+      clickable: true,
       style: {
         fg: 'white',
         bg: 'black',
@@ -134,6 +135,21 @@ export class ChatPanel {
       this.input?.cancel();
       screen.focusPop();
       screen.render();
+    });
+
+    // Tab releases readInput and hands focus to the layout panel.
+    // Without cancel() the textarea keeps eating keystrokes even after
+    // another element takes focus.
+    this.input.key('tab', () => {
+      this.input?.cancel();
+      this.eventBus.emit('ui:focus:layout');
+    });
+
+    // Mouse click elsewhere: blessed moves focus but the textarea stays
+    // in readInput mode and keeps swallowing keypresses. Cancel on blur
+    // so clicks on layout widgets actually receive keyboard input.
+    this.input.on('blur', () => {
+      this.input?.cancel();
     });
 
     // Render initial messages

@@ -35,6 +35,7 @@ export class FormWidget extends BaseWidget {
       parent: context.parent,
       keys: true,
       mouse: true,
+      clickable: true,
       ...this.getLayoutOptions(layout),
       style: {
         fg: styleOptions.fg as string || 'white',
@@ -73,6 +74,7 @@ export class FormWidget extends BaseWidget {
       shrink: true,
       mouse: true,
       keys: true,
+      clickable: true,
       padding: { left: 1, right: 1 },
       style: {
         fg: 'white',
@@ -96,6 +98,7 @@ export class FormWidget extends BaseWidget {
         shrink: true,
         mouse: true,
         keys: true,
+        clickable: true,
         padding: { left: 1, right: 1 },
         style: {
           fg: 'white',
@@ -142,6 +145,7 @@ export class FormWidget extends BaseWidget {
           inputOnFocus: true,
           mouse: true,
           keys: true,
+          clickable: true,
           value: String(initialValue),
           censor: field.type === 'password',
           style: {
@@ -166,6 +170,7 @@ export class FormWidget extends BaseWidget {
           left: 0,
           checked: Boolean(initialValue),
           mouse: true,
+          clickable: true,
           style: {
             fg: field.disabled ? 'gray' : 'white',
           },
@@ -198,6 +203,7 @@ export class FormWidget extends BaseWidget {
             content: opt.label,
             checked: initialValue === opt.value,
             mouse: true,
+            clickable: true,
           });
 
           radio.on('check', () => {
@@ -217,6 +223,7 @@ export class FormWidget extends BaseWidget {
           inputOnFocus: true,
           mouse: true,
           keys: true,
+          clickable: true,
           value: String(initialValue),
           style: {
             fg: field.disabled ? 'gray' : 'white',

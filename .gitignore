@@ -11,6 +11,7 @@ build/
 .env.*.local
 
 # Logs
+server/logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -32,3 +33,4 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
+.env*

@@ -227,7 +227,6 @@ export class Application {
     });
 
     this.client.on('layout', (params) => {
-      process.stderr.write(`[APP] layout received: ${params.layout?.id}\n`);
       this.handleLayoutNotification(params.layout);
     });
 
@@ -284,14 +283,10 @@ export class Application {
     });
 
     // Handle layout applied
-    this.eventBus.on('layout:applied', (layoutId) => {
-      process.stderr.write(`[APP] layout:applied event: ${layoutId}\n`);
+    this.eventBus.on('layout:applied', () => {
       const layout = this.layoutManager.getCurrentLayout();
       if (layout) {
-        process.stderr.write(`[APP] renderLayout: ${layout.id}\n`);
         this.renderLayout(layout);
-      } else {
-        process.stderr.write(`[APP] no layout in manager!\n`);
       }
     });
 
@@ -307,20 +302,33 @@ export class Application {
       }
     });
 
-    // Tab to switch focus between chat and layout
-    this.screen?.key('tab', () => {
-      const chatElement = this.chatPanel?.getElement();
-      if (chatElement && this.screen?.focused === chatElement) {
-        this.layoutContainer?.focus();
+    // Focus the layout panel (tab from chat). Find the first focusable
+    // descendant of layoutContainer — focusing the container itself
+    // doesn't do anything because it's a plain box.
+    this.eventBus.on('ui:focus:layout', () => {
+      const target = this.findFirstFocusable(this.layoutContainer);
+      if (target) {
+        target.focus();
+        this.screen?.render();
       } else {
+        // No focusable widget; bounce back to chat.
         this.chatPanel?.focusInput();
       }
+    });
+
+    // Return focus to the chat input (shift-tab or escape from a widget).
+    this.eventBus.on('ui:focus:chat', () => {
+      this.chatPanel?.focusInput();
       this.screen?.render();
+    });
+
+    // Global shift-tab / escape to return to chat from any widget.
+    this.screen?.key(['S-tab', 'escape'], () => {
+      this.eventBus.emit('ui:focus:chat');
     });
 
     // Handle layout extracted from chat messages (silent rendering)
     this.eventBus.on('chat:layout', (layout) => {
-      process.stderr.write(`[APP] chat:layout received: ${layout?.id}\n`);
       this.handleLayoutNotification(layout);
     });
 
@@ -340,7 +348,6 @@ export class Application {
    */
   private handleLayoutNotification(layout: LayoutDefinition): void {
     const result = this.layoutManager.handleLayout(layout);
-    process.stderr.write(`[APP] validation: ${result.valid}\n`);
 
     if (!result.valid) {
       // Emit error event, preserve previous layout
@@ -406,13 +413,41 @@ export class Application {
     }
   }
 
+  /**
+   * Walk a blessed element tree and return the first focusable descendant.
+   * Focusable = any element blessed would tab to (form, textbox, textarea,
+   * button, checkbox, list, table, etc).
+   */
+  private findFirstFocusable(
+    node: blessed.Widgets.BlessedElement | null | undefined
+  ): blessed.Widgets.BlessedElement | null {
+    if (!node) return null;
+    const focusableTypes = new Set([
+      'form',
+      'textbox',
+      'textarea',
+      'button',
+      'checkbox',
+      'radio-button',
+      'list',
+      'listtable',
+      'table',
+    ]);
+    for (const child of node.children ?? []) {
+      const el = child as blessed.Widgets.BlessedElement;
+      if (focusableTypes.has((el as { type?: string }).type ?? '')) {
+        return el;
+      }
+      const nested = this.findFirstFocusable(el);
+      if (nested) return nested;
+    }
+    return null;
+  }
+
   private renderLayout(layout: LayoutDefinition): void {
-    process.stderr.write(`[APP] renderLayout: ${layout.id}, root: ${layout.root?.type}\n`);
     if (!this.layoutContainer || !this.screen) {
-      process.stderr.write(`[APP] missing container/screen!\n`);
       return;
     }
-    process.stderr.write(`[APP] layoutContainer: ${this.layoutContainer.width}x${this.layoutContainer.height} at ${this.layoutContainer.left},${this.layoutContainer.top}\n`);
 
     const startTime = Date.now();
 
@@ -422,18 +457,18 @@ export class Application {
       this.currentWidgetTree = null;
     }
 
-    // Clear placeholder and other children (but keep error indicator if present)
-    this.layoutContainer.children.forEach((child) => {
+    // Clear placeholder and other children (but keep error indicator if present).
+    // Copy the array first because child.destroy() mutates parent.children,
+    // which would cause forEach to skip siblings and leave stale widgets on screen.
+    for (const child of [...this.layoutContainer.children]) {
       if (child !== this.errorIndicator) {
         child.destroy();
       }
-    });
+    }
 
     // Create new widget tree
     try {
-      process.stderr.write(`[APP] creating widget tree: ${layout.root?.id}\n`);
       this.currentWidgetTree = createWidgetTree(layout.root);
-      process.stderr.write(`[APP] rendering widget tree\n`);
       this.currentWidgetTree.render({
         parent: this.layoutContainer,
         screen: this.screen,
@@ -445,8 +480,6 @@ export class Application {
       this.currentLayoutId = layout.id;
 
       const renderTimeMs = Date.now() - startTime;
-      process.stderr.write(`[APP] widget tree children: ${this.layoutContainer.children.length}\n`);
-      process.stderr.write(`[APP] screen.render()\n`);
       this.screen.render();
 
       // Emit success event (silently - no chat notification)
@@ -456,8 +489,6 @@ export class Application {
         renderTimeMs,
       });
     } catch (err) {
-      process.stderr.write(`[APP] ERROR: ${err}\n`);
-
       // Emit error event, preserve previous layout
       this.eventBus.emit('tui:render:error', {
         layoutId: layout.id,

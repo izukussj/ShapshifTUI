@@ -9,13 +9,12 @@
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",
     "rootDir": "src",
-    "declaration": true,
-    "declarationMap": true,
     "sourceMap": true,
     "resolveJsonModule": true,
+    "jsx": "react-jsx",
     "lib": ["ES2022"],
-    "types": ["node"]
+    "types": ["node", "react"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "tests"]
+  "exclude": ["node_modules", "dist", "legacy"]
 }
