@@ -22,6 +22,11 @@ const PORT = process.env.CODEX_BRIDGE_PORT || process.env.PORT || 8080;
 const CODEX_BIN = process.env.CODEX_BIN || 'codex';
 const SANDBOX = process.env.CODEX_SANDBOX || 'workspace-write';
 
+// Loaded once at startup. Prepended on the first turn of sessions whose cwd
+// is not the default (i.e. the client passed --cwd to run codex elsewhere).
+// When the default cwd is used, codex's own AGENTS.md discovery handles it.
+const CANONICAL_INSTRUCTIONS = fs.readFileSync(path.join(CODEX_CWD, 'AGENTS.md'), 'utf8');
+
 class Session {
   constructor(ws) {
     this.ws = ws;
@@ -29,6 +34,19 @@ class Session {
     this.interactions = [];
     this.logFile = path.join(LOG_DIR, `codex-session-${Date.now()}.jsonl`);
     this.busy = false;
+    this.cwd = CODEX_CWD;
+  }
+
+  handleInit({ cwd }) {
+    if (typeof cwd !== 'string' || !cwd) return;
+    const resolved = path.resolve(cwd);
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      this.sendError(`--cwd path does not exist or is not a directory: ${resolved}`);
+      return;
+    }
+    this.cwd = resolved;
+    this.log({ type: 'init', cwd: resolved });
+    this.send('ai', `Working in \`${resolved}\`.`);
   }
 
   log(entry) {
@@ -104,11 +122,18 @@ class Session {
     // `codex exec resume` inherits sandbox/cwd from the original session, so
     // we only pass -s/-C on the first turn. It doesn't accept them on resume.
     const resume = this.threadId !== null;
+    // On first turn with a non-default cwd, codex can't discover our AGENTS.md
+    // (it lives in server/codex/). Prepend the canonical contract as a preamble
+    // so the widget rendering protocol applies wherever codex runs.
+    const needsPreamble = !resume && this.cwd !== CODEX_CWD;
+    const finalPrompt = needsPreamble
+      ? `${CANONICAL_INSTRUCTIONS}\n\n---\n\nUser: ${prompt}`
+      : prompt;
     const args = resume
-      ? ['exec', 'resume', this.threadId, '--json', '--skip-git-repo-check', prompt]
-      : ['exec', '--json', '--skip-git-repo-check', '-s', SANDBOX, '-C', CODEX_CWD, prompt];
+      ? ['exec', 'resume', this.threadId, '--json', '--skip-git-repo-check', finalPrompt]
+      : ['exec', '--json', '--skip-git-repo-check', '-s', SANDBOX, '-C', this.cwd, finalPrompt];
 
-    this.log({ type: 'codex-spawn', resume, threadId: this.threadId, promptPreview: prompt.slice(0, 200) });
+    this.log({ type: 'codex-spawn', resume, threadId: this.threadId, cwd: this.cwd, preamble: needsPreamble, promptPreview: prompt.slice(0, 200) });
 
     let stderrBuf = '';
     let stdoutBuf = '';
@@ -213,7 +238,9 @@ wss.on('connection', (ws) => {
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
-    if (msg.type === 'chat') {
+    if (msg.type === 'init') {
+      session.handleInit(msg);
+    } else if (msg.type === 'chat') {
       session.handleChat(msg.content, msg.interactions);
     } else if (msg.type === 'event') {
       session.handleEvent(msg.eventType, msg.data);

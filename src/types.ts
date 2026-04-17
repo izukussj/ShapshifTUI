@@ -23,5 +23,6 @@ export type ServerMessage =
   | { type: 'status'; text: string | null };
 
 export type ClientMessage =
+  | { type: 'init'; cwd: string }
   | { type: 'chat'; content: string; interactions: InteractionRecord[] }
   | { type: 'event'; eventType: string; data: unknown };

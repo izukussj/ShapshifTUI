@@ -1,7 +1,7 @@
 import React from 'react';
 import * as Ink from 'ink';
 import TextInput from 'ink-text-input';
-import { Button } from './components.js';
+import { Button, Checkbox, Select, Table, Progress } from './components.js';
 
 /**
  * The set of names exposed inside the sandbox. The AI-generated component
@@ -32,6 +32,10 @@ export const runtimeGlobals = {
   // input + custom widgets
   TextInput,
   Button,
+  Checkbox,
+  Select,
+  Table,
+  Progress,
 };
 
 export type RuntimeGlobals = typeof runtimeGlobals;

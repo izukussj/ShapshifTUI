@@ -56,7 +56,17 @@ On receiving these, you execute the request (subject to approval) and re-emit th
 
 - React: `React`, `useState`, `useEffect`, `useRef`, `useMemo`, `useCallback`, `useReducer`
 - Ink: `Box`, `Text`, `Newline`, `Spacer`, `Static`, `Transform`, `useFocus`, `useFocusManager`, `useInput`
-- Inputs: `TextInput`, `Button` (focusable, Tab/Enter/Space)
+- Widgets: `TextInput`, `Button`, `Checkbox`, `Select`, `Table`, `Progress`
+
+### Widget reference
+
+Prefer these over hand-rolling equivalents — they're focusable, click/hover-aware, and keep UIs consistent.
+
+- `<Button label="…" onPress={() => …} />` — Tab to focus, Enter/Space or click to activate.
+- `<Checkbox label="…" checked={bool} onChange={next => …} />` — Enter/Space/click toggles.
+- `<Select options={['a','b'] | [{label,value}, …]} onSelect={(value, i) => …} initialIndex?={0} />` — Arrow keys + Enter.
+- `<Table columns={[{ key, label, width?, align? }, …]} rows={[{…}, …]} onRowPress?={(row, i) => …} />` — rows are clickable when `onRowPress` is set.
+- `<Progress value={0..1} width?={20} label?="…" />` — render ratios, completion, anything continuous.
 
 ### Rules
 
