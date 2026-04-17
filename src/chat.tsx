@@ -1,7 +1,21 @@
 import React, { useState } from 'react';
-import { Box, Text, useStdout } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import type { ChatMessage } from './types.js';
+
+interface SlashCommand {
+  name: string;
+  args: string;
+  help: string;
+}
+
+const COMMANDS: SlashCommand[] = [
+  { name: '/save', args: '<name>', help: 'save the current view for later' },
+  { name: '/load', args: '<name>', help: 'restore a saved view' },
+  { name: '/views', args: '', help: 'list saved views (clickable)' },
+  { name: '/delete', args: '<name>', help: 'remove a saved view' },
+  { name: '/help', args: '', help: 'show this list' },
+];
 
 interface ChatProps {
   messages: ChatMessage[];
@@ -14,6 +28,21 @@ export function Chat({ messages, onSend, focused, scrollOffset }: ChatProps): Re
   const [draft, setDraft] = useState('');
   const { stdout } = useStdout();
 
+  // Slash-command autocomplete. Only active when the draft starts with "/" and
+  // the user hasn't typed a space yet — once they're on args, suggestions hide.
+  const slashInput = draft.startsWith('/') && !draft.includes(' ');
+  const suggestions = slashInput
+    ? COMMANDS.filter((c) => c.name.startsWith(draft))
+    : [];
+
+  useInput((input, key) => {
+    if (!focused) return;
+    if (key.tab && suggestions.length > 0) {
+      const top = suggestions[0]!;
+      setDraft(top.args ? `${top.name} ` : top.name);
+    }
+  }, { isActive: focused });
+
   const submit = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
@@ -21,9 +50,10 @@ export function Chat({ messages, onSend, focused, scrollOffset }: ChatProps): Re
     setDraft('');
   };
 
-  // Reserve 5 lines for border (2) + padding (2) + input row (1). When scrolled
-  // back, steal one line for the scroll-position hint.
-  const reserved = scrollOffset > 0 ? 6 : 5;
+  // Reserve border (2) + padding (2) + input (1); add lines for scrollback hint
+  // and suggestion rows so the message window shrinks rather than overflows.
+  const suggestionLines = suggestions.length > 0 ? suggestions.length + 1 : 0;
+  const reserved = 5 + (scrollOffset > 0 ? 1 : 0) + suggestionLines;
   const maxVisible = Math.max(1, stdout.rows - reserved);
   const end = Math.max(0, messages.length - scrollOffset);
   const start = Math.max(0, end - maxVisible);
@@ -54,6 +84,22 @@ export function Chat({ messages, onSend, focused, scrollOffset }: ChatProps): Re
           visible.map((m) => <ChatLine key={m.id} message={m} />)
         )}
       </Box>
+      {suggestions.length > 0 ? (
+        <Box flexDirection="column" marginBottom={0}>
+          <Text dimColor>— Tab completes —</Text>
+          {suggestions.map((c, i) => (
+            <Box key={c.name}>
+              <Box width={12}>
+                <Text color={i === 0 ? 'cyan' : undefined} bold={i === 0}>{c.name}</Text>
+              </Box>
+              <Box width={12}>
+                <Text dimColor>{c.args}</Text>
+              </Box>
+              <Text dimColor>{c.help}</Text>
+            </Box>
+          ))}
+        </Box>
+      ) : null}
       <Box>
         <Text color={focused ? 'cyan' : 'gray'}>{'> '}</Text>
         <TextInput

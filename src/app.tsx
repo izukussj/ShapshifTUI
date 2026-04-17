@@ -182,7 +182,14 @@ export function App({ client }: AppProps): React.ReactElement {
           return;
         }
         if (cmd === '/help') {
-          return pushSystem('commands: /save <name>, /load <name>, /views, /delete <name>');
+          return pushSystem(
+            'commands:\n' +
+              '  /save <name>    save the current view\n' +
+              '  /load <name>    restore a saved view\n' +
+              '  /views          list saved views\n' +
+              '  /delete <name>  remove a saved view\n' +
+              'tip: start typing "/" — Tab completes.',
+          );
         }
         return pushSystem(`unknown command: ${cmd} — try /help`);
       }
