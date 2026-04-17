@@ -13,6 +13,29 @@ const MOUSE_RE = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g;
 const mouseEmitter = new EventEmitter();
 mouseEmitter.setMaxListeners(0);
 
+/**
+ * Parses SGR mouse escape sequences out of a chunk of stdin data.
+ * Returns the extracted events plus the chunk with mouse bytes stripped.
+ * Pure function — exported for unit testing.
+ */
+export function parseMouseChunk(str: string): { events: MouseEvent[]; cleaned: string } {
+  MOUSE_RE.lastIndex = 0;
+  const events: MouseEvent[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = MOUSE_RE.exec(str)) !== null) {
+    const rawBtn = parseInt(match[1]!, 10);
+    const isMotion = (rawBtn & 32) !== 0;
+    events.push({
+      button: rawBtn & 3,
+      x: parseInt(match[2]!, 10) - 1,
+      y: parseInt(match[3]!, 10) - 1,
+      type: isMotion ? 'motion' : match[4] === 'M' ? 'press' : 'release',
+    });
+  }
+  const cleaned = events.length === 0 ? str : str.replace(/\x1b\[<\d+;\d+;\d+[Mm]/g, '');
+  return { events, cleaned };
+}
+
 export function enableMouse(): void {
   // 1003 = all-motion tracking (needed for hover); 1006 = SGR coord format.
   process.stdout.write('\x1b[?1003h\x1b[?1006h');
@@ -64,26 +87,10 @@ export function installMouseInterceptor(): () => void {
     const isBuffer = Buffer.isBuffer(chunk);
     const str = isBuffer ? chunk.toString('utf8') : (chunk as string);
 
-    MOUSE_RE.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    let found = false;
-    while ((match = MOUSE_RE.exec(str)) !== null) {
-      found = true;
-      const rawBtn = parseInt(match[1]!, 10);
-      const isMotion = (rawBtn & 32) !== 0;
-      mouseEmitter.emit('mouse', {
-        button: rawBtn & 3,
-        x: parseInt(match[2]!, 10) - 1,
-        y: parseInt(match[3]!, 10) - 1,
-        type: isMotion ? 'motion' : match[4] === 'M' ? 'press' : 'release',
-      });
-    }
-
-    if (!found) return chunk;
-    const cleaned = str.replace(/\x1b\[<\d+;\d+;\d+[Mm]/g, '');
-    if (cleaned.length === 0) {
-      return isBuffer ? Buffer.alloc(0) : '';
-    }
+    const { events, cleaned } = parseMouseChunk(str);
+    if (events.length === 0) return chunk;
+    for (const e of events) mouseEmitter.emit('mouse', e);
+    if (cleaned.length === 0) return isBuffer ? Buffer.alloc(0) : '';
     return isBuffer ? Buffer.from(cleaned, 'utf8') : cleaned;
   };
 
