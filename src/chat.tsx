@@ -7,10 +7,10 @@ interface ChatProps {
   messages: ChatMessage[];
   onSend: (content: string) => void;
   focused: boolean;
-  status: string | null;
+  scrollOffset: number;
 }
 
-export function Chat({ messages, onSend, focused, status }: ChatProps): React.ReactElement {
+export function Chat({ messages, onSend, focused, scrollOffset }: ChatProps): React.ReactElement {
   const [draft, setDraft] = useState('');
   const { stdout } = useStdout();
 
@@ -21,9 +21,15 @@ export function Chat({ messages, onSend, focused, status }: ChatProps): React.Re
     setDraft('');
   };
 
-  // Reserve 6 lines for border (2) + padding (2) + input row (1) + margin (1).
-  const maxVisible = Math.max(1, stdout.rows - 6);
-  const visible = messages.slice(-maxVisible);
+  // Reserve 5 lines for border (2) + padding (2) + input row (1). When scrolled
+  // back, steal one line for the scroll-position hint.
+  const reserved = scrollOffset > 0 ? 6 : 5;
+  const maxVisible = Math.max(1, stdout.rows - reserved);
+  const end = Math.max(0, messages.length - scrollOffset);
+  const start = Math.max(0, end - maxVisible);
+  const visible = messages.slice(start, end);
+  const olderHidden = start;
+  const newerHidden = messages.length - end;
 
   return (
     <Box
@@ -34,17 +40,19 @@ export function Chat({ messages, onSend, focused, status }: ChatProps): React.Re
       width="40%"
       flexGrow={1}
     >
+      {scrollOffset > 0 ? (
+        <Box>
+          <Text color="yellow" dimColor>
+            ── scrolled: {olderHidden} above · {newerHidden} below · PageDn to resume ──
+          </Text>
+        </Box>
+      ) : null}
       <Box flexDirection="column" flexGrow={1}>
         {visible.length === 0 ? (
           <Text dimColor>Type a message to get started.</Text>
         ) : (
           visible.map((m) => <ChatLine key={m.id} message={m} />)
         )}
-      </Box>
-      <Box minHeight={1}>
-        {status ? (
-          <Text dimColor italic>{`⋯ ${status}`}</Text>
-        ) : null}
       </Box>
       <Box>
         <Text color={focused ? 'cyan' : 'gray'}>{'> '}</Text>

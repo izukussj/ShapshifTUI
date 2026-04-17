@@ -36,7 +36,7 @@ function viewFile(cwd, name) {
 
 const PORT = process.env.CODEX_BRIDGE_PORT || process.env.PORT || 8080;
 const CODEX_BIN = process.env.CODEX_BIN || 'codex';
-const SANDBOX = process.env.CODEX_SANDBOX || 'workspace-write';
+const SANDBOX = process.env.CODEX_SANDBOX || 'read-only';
 
 // Loaded once at startup. Prepended on the first turn of sessions whose cwd
 // is not the default (i.e. the client passed --cwd to run codex elsewhere).
@@ -54,6 +54,46 @@ class Session {
     // Transcript of chat-visible turns (user + ai + system), used for save/load.
     // Not the same as this.log() which is the full JSONL debug stream.
     this.transcript = [];
+    // Pending approval gate entries, keyed by id. Value: { eventType, data }.
+    this.pendingApprovals = new Map();
+    // The codex child for the in-flight turn, or null when idle. Lets
+    // handleCancel() SIGTERM the process on user request.
+    this.currentChild = null;
+    this.cancelled = false;
+  }
+
+  summarizeAction(data) {
+    const d = data ?? {};
+    if (d.tool === 'shell') return { tool: 'shell', summary: `shell: ${d.cmd ?? '(no cmd)'}` };
+    if (d.tool === 'mcp') {
+      const args = d.args ? ` ${JSON.stringify(d.args)}` : '';
+      return { tool: 'mcp', summary: `mcp ${d.server}/${d.name}${args}` };
+    }
+    return { tool: 'other', summary: `action: ${JSON.stringify(d).slice(0, 120)}` };
+  }
+
+  requestApproval(eventType, data) {
+    const id = `a-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const { tool, summary } = this.summarizeAction(data);
+    this.pendingApprovals.set(id, { eventType, data });
+    this.ws.send(JSON.stringify({
+      type: 'approval_request',
+      request: { id, tool, summary, details: data ?? null },
+    }));
+    this.log({ type: 'approval-request', id, tool, summary });
+  }
+
+  async handleApprovalResponse(id, approved) {
+    const pending = this.pendingApprovals.get(id);
+    if (!pending) return;
+    this.pendingApprovals.delete(id);
+    this.log({ type: 'approval-response', id, approved });
+    if (!approved) {
+      const { summary } = this.summarizeAction(pending.data);
+      this.send('system', `denied — ${summary}`);
+      return;
+    }
+    await this.runTurn(this.formatEventPrompt(pending.eventType, pending.data) + this.interactionContext());
   }
 
   recordTurn(sender, content) {
@@ -102,6 +142,32 @@ class Session {
   sendStatus(text) {
     this.ws.send(JSON.stringify({ type: 'status', text }));
     this.log({ type: 'status', text });
+  }
+
+  sendNotice(level, text) {
+    this.ws.send(JSON.stringify({ type: 'notice', level, text }));
+    this.log({ type: 'notice', level, text });
+  }
+
+  maybePromoteSandboxDenial(text) {
+    // Codex wraps blocked commands' stderr inside agent_message prose. Surface
+    // the underlying OS denial as a vim-style bar so users don't have to read
+    // the chat wall to notice a write was blocked by the sandbox.
+    const patterns = [
+      /Operation not permitted/,
+      /Read-only file system/,
+      /Permission denied/,
+      /sandbox (?:is )?read-only/i,
+      /blocked by the (?:read-only )?sandbox/i,
+    ];
+    for (const re of patterns) {
+      const m = text.match(re);
+      if (m) {
+        const line = text.split('\n').find((l) => re.test(l)) ?? m[0];
+        this.sendNotice('error', line.trim().slice(0, 200));
+        return;
+      }
+    }
   }
 
   mergeInteractions(incoming) {
@@ -171,6 +237,8 @@ class Session {
     status('thinking…');
 
     const child = spawn(CODEX_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    this.currentChild = child;
+    this.cancelled = false;
 
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
@@ -199,6 +267,7 @@ class Session {
           if (evt.type === 'item.completed' && evt.item?.type === 'agent_message' && typeof evt.item.text === 'string') {
             anyOutput = true;
             this.send('ai', evt.item.text);
+            this.maybePromoteSandboxDenial(evt.item.text);
             continue;
           }
 
@@ -223,7 +292,12 @@ class Session {
 
     child.on('close', (code) => {
       this.busy = false;
+      this.currentChild = null;
       this.sendStatus(null);
+      if (this.cancelled) {
+        this.send('system', 'turn cancelled');
+        return;
+      }
       if (code !== 0) {
         this.sendError(`codex exited with code ${code}${stderrBuf ? `: ${stderrBuf.trim().slice(-500)}` : ''}`);
         return;
@@ -235,8 +309,16 @@ class Session {
 
     child.on('error', (err) => {
       this.busy = false;
+      this.currentChild = null;
       this.sendError(`Failed to launch codex (${CODEX_BIN}): ${err.message}`);
     });
+  }
+
+  handleCancel() {
+    if (!this.currentChild) return;
+    this.cancelled = true;
+    this.currentChild.kill('SIGTERM');
+    this.log({ type: 'cancel' });
   }
 
   async handleChat(content, clientInteractions) {
@@ -253,6 +335,13 @@ class Session {
 
     if (eventType === 'load-view' && data && typeof data.name === 'string') {
       this.handleLoad(data.name);
+      return;
+    }
+
+    // Gate any `action` event behind an explicit user approval. `navigate`,
+    // `refresh`, and other signaling events pass through as before.
+    if (eventType === 'action') {
+      this.requestApproval(eventType, data);
       return;
     }
 
@@ -398,6 +487,10 @@ wss.on('connection', (ws) => {
       session.handleListViews();
     } else if (msg.type === 'delete-view') {
       session.handleDeleteView(msg.name);
+    } else if (msg.type === 'approval_response') {
+      session.handleApprovalResponse(msg.id, !!msg.approved);
+    } else if (msg.type === 'cancel') {
+      session.handleCancel();
     }
   });
 

@@ -1,27 +1,34 @@
-import React, { useRef, useState } from 'react';
+import React, { createContext, useContext, useRef, useState } from 'react';
 import { Box, Text, useFocus, useInput } from 'ink';
 import type { DOMElement } from 'ink';
 import { useMouseClick, useMouseHover } from './mouse.js';
 
+// Lets a parent mark a subtree as focus-inert (e.g. behind a modal banner).
+// Widgets in the subtree won't appear in Tab order, won't highlight on hover,
+// and won't respond to clicks or Enter/Space.
+export const FocusActiveContext = createContext(true);
+
 interface ButtonProps {
   label: string;
   onPress: () => void;
+  autoFocus?: boolean;
 }
 
-export function Button({ label, onPress }: ButtonProps): React.ReactElement {
-  const { isFocused } = useFocus();
+export function Button({ label, onPress, autoFocus }: ButtonProps): React.ReactElement {
+  const isActive = useContext(FocusActiveContext);
+  const { isFocused } = useFocus({ autoFocus, isActive });
   const ref = useRef<DOMElement | null>(null);
   const hovered = useMouseHover(ref);
-  useMouseClick(ref, onPress);
+  useMouseClick(ref, () => { if (isActive) onPress(); });
 
   useInput((input, key) => {
-    if (!isFocused) return;
+    if (!isFocused || !isActive) return;
     if (key.return || input === ' ') {
       onPress();
     }
   });
 
-  const active = isFocused || hovered;
+  const active = (isFocused || hovered) && isActive;
 
   return (
     <Box
@@ -42,17 +49,18 @@ interface CheckboxProps {
 }
 
 export function Checkbox({ label, checked, onChange }: CheckboxProps): React.ReactElement {
-  const { isFocused } = useFocus();
+  const isActive = useContext(FocusActiveContext);
+  const { isFocused } = useFocus({ isActive });
   const ref = useRef<DOMElement | null>(null);
   const hovered = useMouseHover(ref);
-  useMouseClick(ref, () => onChange(!checked));
+  useMouseClick(ref, () => { if (isActive) onChange(!checked); });
 
   useInput((input, key) => {
-    if (!isFocused) return;
+    if (!isFocused || !isActive) return;
     if (key.return || input === ' ') onChange(!checked);
   });
 
-  const active = isFocused || hovered;
+  const active = (isFocused || hovered) && isActive;
   return (
     <Box ref={ref} paddingX={1}>
       <Text color={active ? 'cyan' : undefined} bold={active}>
@@ -74,7 +82,8 @@ interface SelectProps {
 }
 
 export function Select({ options, onSelect, initialIndex = 0 }: SelectProps): React.ReactElement {
-  const { isFocused } = useFocus();
+  const isActive = useContext(FocusActiveContext);
+  const { isFocused } = useFocus({ isActive });
   const normalized: SelectOption[] = options.map((o) =>
     typeof o === 'string' ? { label: o, value: o } : o,
   );
@@ -83,7 +92,7 @@ export function Select({ options, onSelect, initialIndex = 0 }: SelectProps): Re
   );
 
   useInput((_input, key) => {
-    if (!isFocused) return;
+    if (!isFocused || !isActive) return;
     if (key.upArrow) setIndex((i) => Math.max(0, i - 1));
     else if (key.downArrow) setIndex((i) => Math.min(normalized.length - 1, i + 1));
     else if (key.return) {
@@ -163,9 +172,10 @@ interface TableRowProps {
 }
 
 function TableRow({ columns, row, onPress }: TableRowProps): React.ReactElement {
+  const isActive = useContext(FocusActiveContext);
   const ref = useRef<DOMElement | null>(null);
-  const hovered = useMouseHover(ref);
-  useMouseClick(ref, onPress);
+  const hovered = useMouseHover(ref) && isActive;
+  useMouseClick(ref, () => { if (isActive) onPress(); });
   return (
     <Box ref={ref}>
       {columns.map((c) => (

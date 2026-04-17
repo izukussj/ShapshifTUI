@@ -13,6 +13,13 @@ export interface InteractionRecord {
   timestamp: number;
 }
 
+export interface ApprovalRequest {
+  id: string;
+  tool: 'shell' | 'mcp' | 'other';
+  summary: string;
+  details: unknown;
+}
+
 /**
  * Wire protocol — minimal JSON over websocket. No JSON-RPC envelope, no
  * handshake. The first message either side sends sets the contract.
@@ -21,7 +28,9 @@ export type ServerMessage =
   | { type: 'message'; message: ChatMessage }
   | { type: 'error'; error: string }
   | { type: 'status'; text: string | null }
-  | { type: 'restore'; name: string; messages: ChatMessage[] };
+  | { type: 'restore'; name: string; messages: ChatMessage[] }
+  | { type: 'approval_request'; request: ApprovalRequest }
+  | { type: 'notice'; level: 'error' | 'warning' | 'info'; text: string };
 
 export type ClientMessage =
   | { type: 'init'; cwd: string }
@@ -30,4 +39,6 @@ export type ClientMessage =
   | { type: 'save'; name: string }
   | { type: 'load'; name: string }
   | { type: 'list-views' }
-  | { type: 'delete-view'; name: string };
+  | { type: 'delete-view'; name: string }
+  | { type: 'approval_response'; id: string; approved: boolean }
+  | { type: 'cancel' };
