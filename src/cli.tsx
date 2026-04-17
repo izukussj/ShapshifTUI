@@ -2,12 +2,14 @@ import React from 'react';
 import { render } from 'ink';
 import { App } from './app.js';
 import { Client } from './client.js';
+import { setMouseEnabled } from './mouse.js';
 
 function enterAltScreen() {
   process.stdout.write('\x1b[?1049h\x1b[H');
 }
 
 function exitAltScreen() {
+  setMouseEnabled(false);
   process.stdout.write('\x1b[?1049l');
 }
 
@@ -23,6 +25,7 @@ async function main() {
   }
 
   enterAltScreen();
+  if (process.env.SHAPESHIFTUI_MOUSE === '1') setMouseEnabled(true);
 
   // Restore terminal on any exit path.
   process.on('exit', exitAltScreen);

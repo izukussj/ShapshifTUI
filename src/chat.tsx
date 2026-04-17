@@ -7,9 +7,10 @@ interface ChatProps {
   messages: ChatMessage[];
   onSend: (content: string) => void;
   focused: boolean;
+  status: string | null;
 }
 
-export function Chat({ messages, onSend, focused }: ChatProps): React.ReactElement {
+export function Chat({ messages, onSend, focused, status }: ChatProps): React.ReactElement {
   const [draft, setDraft] = useState('');
   const { stdout } = useStdout();
 
@@ -40,7 +41,12 @@ export function Chat({ messages, onSend, focused }: ChatProps): React.ReactEleme
           visible.map((m) => <ChatLine key={m.id} message={m} />)
         )}
       </Box>
-      <Box marginTop={1}>
+      <Box minHeight={1}>
+        {status ? (
+          <Text dimColor italic>{`⋯ ${status}`}</Text>
+        ) : null}
+      </Box>
+      <Box>
         <Text color={focused ? 'cyan' : 'gray'}>{'> '}</Text>
         <TextInput
           value={draft}

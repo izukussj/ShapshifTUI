@@ -19,7 +19,8 @@ export interface InteractionRecord {
  */
 export type ServerMessage =
   | { type: 'message'; message: ChatMessage }
-  | { type: 'error'; error: string };
+  | { type: 'error'; error: string }
+  | { type: 'status'; text: string | null };
 
 export type ClientMessage =
   | { type: 'chat'; content: string; interactions: InteractionRecord[] }

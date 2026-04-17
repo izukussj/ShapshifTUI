@@ -5,6 +5,7 @@ import { Runtime } from './runtime.js';
 import { Client } from './client.js';
 import { extractCodeBlock, type SendEvent, type SubmitEvent, type InteractionContext } from './sandbox.js';
 import type { ChatMessage, InteractionRecord, ServerMessage } from './types.js';
+import { onMouse, setMouseEnabled, isMouseEnabled } from './mouse.js';
 
 const HISTORY_LIMIT = 50;
 const MAX_RETRIES = 2;
@@ -22,14 +23,28 @@ export function App({ client }: AppProps): React.ReactElement {
   const [source, setSource] = useState<string | null>(null);
   const [interactions, setInteractions] = useState<InteractionRecord[]>([]);
   const [activePane, setActivePane] = useState<Pane>('chat');
+  const [status, setStatus] = useState<string | null>(null);
+  const [mouseOn, setMouseOn] = useState<boolean>(isMouseEnabled());
   const retryCount = useRef(0);
 
-  // Only Ctrl keybinds — no bare letter shortcuts that conflict with typing.
   useInput((_input, key) => {
     if (key.ctrl && _input === 'c') exit();
     if (key.ctrl && _input === 'a') setActivePane('chat');
     if (key.ctrl && _input === 'e') setActivePane('runtime');
+    if (key.ctrl && _input === 'p') {
+      const next = setMouseEnabled(!mouseOn);
+      setMouseOn(next);
+      setStatus(next ? 'mouse on — hold Option to select text' : 'mouse off — text selection restored');
+    }
   });
+
+  useEffect(() => {
+    return onMouse((e) => {
+      if (e.type !== 'press') return;
+      const chatWidth = Math.floor(stdout.columns * 0.4);
+      setActivePane(e.x < chatWidth ? 'chat' : 'runtime');
+    });
+  }, [stdout.columns]);
 
   useEffect(() => {
     const handler = (msg: ServerMessage) => {
@@ -41,6 +56,7 @@ export function App({ client }: AppProps): React.ReactElement {
           retryCount.current = 0;
         }
       } else if (msg.type === 'error') {
+        setStatus(null);
         setMessages((prev) => [
           ...prev,
           {
@@ -50,6 +66,8 @@ export function App({ client }: AppProps): React.ReactElement {
             timestamp: Date.now(),
           },
         ]);
+      } else if (msg.type === 'status') {
+        setStatus(msg.text);
       }
     };
     const remove = client.onMessage(handler);
@@ -88,6 +106,7 @@ export function App({ client }: AppProps): React.ReactElement {
         timestamp: Date.now(),
       };
       setMessages((prev) => [...prev, userMsg]);
+      setStatus(null);
       client.send({ type: 'chat', content, interactions });
     },
     [client, interactions],
@@ -107,15 +126,6 @@ export function App({ client }: AppProps): React.ReactElement {
   const submitEvent: SubmitEvent = useCallback((eventType, data) => {
     recordEvent(eventType, data);
     client.send({ type: 'event', eventType, data });
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `ev-${Date.now()}`,
-        sender: 'system' as const,
-        content: `[${eventType}]`,
-        timestamp: Date.now(),
-      },
-    ]);
   }, [client, recordEvent]);
 
   const context: InteractionContext = { events: interactions };
@@ -123,7 +133,7 @@ export function App({ client }: AppProps): React.ReactElement {
   return (
     <Box flexDirection="column" width={stdout.columns} height={stdout.rows}>
       <Box flexDirection="row" flexGrow={1}>
-        <Chat messages={messages} onSend={onSend} focused={activePane === 'chat'} />
+        <Chat messages={messages} onSend={onSend} focused={activePane === 'chat'} status={status} />
         <Box flexGrow={1} flexDirection="column">
           <Runtime
             source={source}
@@ -136,7 +146,9 @@ export function App({ client }: AppProps): React.ReactElement {
         </Box>
       </Box>
       <Box paddingX={1}>
-        <Text dimColor>Ctrl+A: chat  Ctrl+E: component  Ctrl+C: quit</Text>
+        <Text dimColor>
+          Ctrl+A: chat  Ctrl+E: component  Ctrl+P: mouse ({mouseOn ? 'on' : 'off'})  Ctrl+C: quit
+        </Text>
       </Box>
     </Box>
   );

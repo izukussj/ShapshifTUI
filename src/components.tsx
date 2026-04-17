@@ -1,17 +1,18 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Box, Text, useFocus, useInput } from 'ink';
+import type { DOMElement } from 'ink';
+import { useMouseClick, useMouseHover } from './mouse.js';
 
 interface ButtonProps {
   label: string;
   onPress: () => void;
 }
 
-/**
- * Minimal Ink button: focusable with Tab, fires onPress on Enter or Space.
- * Visible focus state via inverse colors.
- */
 export function Button({ label, onPress }: ButtonProps): React.ReactElement {
   const { isFocused } = useFocus();
+  const ref = useRef<DOMElement | null>(null);
+  const hovered = useMouseHover(ref);
+  useMouseClick(ref, onPress);
 
   useInput((input, key) => {
     if (!isFocused) return;
@@ -20,13 +21,16 @@ export function Button({ label, onPress }: ButtonProps): React.ReactElement {
     }
   });
 
+  const active = isFocused || hovered;
+
   return (
     <Box
+      ref={ref}
       borderStyle="round"
-      borderColor={isFocused ? 'cyan' : 'gray'}
+      borderColor={active ? 'cyan' : 'gray'}
       paddingX={1}
     >
-      <Text inverse={isFocused}>{label}</Text>
+      <Text inverse={isFocused} bold={hovered && !isFocused}>{label}</Text>
     </Box>
   );
 }
