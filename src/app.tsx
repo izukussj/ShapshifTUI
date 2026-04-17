@@ -68,6 +68,14 @@ export function App({ client }: AppProps): React.ReactElement {
         ]);
       } else if (msg.type === 'status') {
         setStatus(msg.text);
+      } else if (msg.type === 'restore') {
+        setMessages(msg.messages);
+        setInteractions([]);
+        retryCount.current = 0;
+        const lastAi = [...msg.messages].reverse().find((m) => m.sender === 'ai');
+        const code = lastAi ? extractCodeBlock(lastAi.content) : null;
+        setSource(code);
+        setStatus(`loaded "${msg.name}"`);
       }
     };
     const remove = client.onMessage(handler);
@@ -97,8 +105,44 @@ export function App({ client }: AppProps): React.ReactElement {
     [client],
   );
 
+  const pushSystem = useCallback((content: string) => {
+    setMessages((prev) => [
+      ...prev,
+      { id: `sys-${Date.now()}`, sender: 'system', content, timestamp: Date.now() },
+    ]);
+  }, []);
+
   const onSend = useCallback(
     (content: string) => {
+      const trimmed = content.trim();
+      if (trimmed.startsWith('/')) {
+        const [cmd, ...rest] = trimmed.split(/\s+/);
+        const arg = rest.join(' ').trim();
+        if (cmd === '/save') {
+          if (!arg) return pushSystem('usage: /save <name>');
+          client.send({ type: 'save', name: arg });
+          return;
+        }
+        if (cmd === '/load') {
+          if (!arg) return pushSystem('usage: /load <name>');
+          client.send({ type: 'load', name: arg });
+          return;
+        }
+        if (cmd === '/views' || cmd === '/list') {
+          client.send({ type: 'list-views' });
+          return;
+        }
+        if (cmd === '/delete' || cmd === '/rm') {
+          if (!arg) return pushSystem('usage: /delete <name>');
+          client.send({ type: 'delete-view', name: arg });
+          return;
+        }
+        if (cmd === '/help') {
+          return pushSystem('commands: /save <name>, /load <name>, /views, /delete <name>');
+        }
+        return pushSystem(`unknown command: ${cmd} — try /help`);
+      }
+
       const userMsg: ChatMessage = {
         id: `u-${Date.now()}`,
         sender: 'user',
@@ -109,7 +153,7 @@ export function App({ client }: AppProps): React.ReactElement {
       setStatus(null);
       client.send({ type: 'chat', content, interactions });
     },
-    [client, interactions],
+    [client, interactions, pushSystem],
   );
 
   const recordEvent = useCallback((eventType: string, data: unknown) => {

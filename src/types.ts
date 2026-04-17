@@ -20,9 +20,14 @@ export interface InteractionRecord {
 export type ServerMessage =
   | { type: 'message'; message: ChatMessage }
   | { type: 'error'; error: string }
-  | { type: 'status'; text: string | null };
+  | { type: 'status'; text: string | null }
+  | { type: 'restore'; name: string; messages: ChatMessage[] };
 
 export type ClientMessage =
   | { type: 'init'; cwd: string }
   | { type: 'chat'; content: string; interactions: InteractionRecord[] }
-  | { type: 'event'; eventType: string; data: unknown };
+  | { type: 'event'; eventType: string; data: unknown }
+  | { type: 'save'; name: string }
+  | { type: 'load'; name: string }
+  | { type: 'list-views' }
+  | { type: 'delete-view'; name: string };

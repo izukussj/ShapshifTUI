@@ -11,12 +11,28 @@ import { WebSocketServer } from 'ws';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CODEX_CWD = path.join(__dirname, 'codex');
 const LOG_DIR = path.join(__dirname, 'logs');
+const VIEWS_DIR = path.join(os.homedir(), '.shapeshiftui', 'views');
 fs.mkdirSync(LOG_DIR, { recursive: true });
+fs.mkdirSync(VIEWS_DIR, { recursive: true });
+
+function cwdHash(cwd) {
+  return crypto.createHash('sha1').update(cwd).digest('hex').slice(0, 12);
+}
+
+function viewDir(cwd) {
+  return path.join(VIEWS_DIR, cwdHash(cwd));
+}
+
+function viewFile(cwd, name) {
+  return path.join(viewDir(cwd), `${encodeURIComponent(name)}.json`);
+}
 
 const PORT = process.env.CODEX_BRIDGE_PORT || process.env.PORT || 8080;
 const CODEX_BIN = process.env.CODEX_BIN || 'codex';
@@ -35,6 +51,18 @@ class Session {
     this.logFile = path.join(LOG_DIR, `codex-session-${Date.now()}.jsonl`);
     this.busy = false;
     this.cwd = CODEX_CWD;
+    // Transcript of chat-visible turns (user + ai + system), used for save/load.
+    // Not the same as this.log() which is the full JSONL debug stream.
+    this.transcript = [];
+  }
+
+  recordTurn(sender, content) {
+    this.transcript.push({
+      id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      sender,
+      content,
+      timestamp: Date.now(),
+    });
   }
 
   handleInit({ cwd }) {
@@ -54,15 +82,14 @@ class Session {
   }
 
   send(sender, content) {
-    this.ws.send(JSON.stringify({
-      type: 'message',
-      message: {
-        id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        sender,
-        content,
-        timestamp: Date.now(),
-      },
-    }));
+    const message = {
+      id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      sender,
+      content,
+      timestamp: Date.now(),
+    };
+    this.ws.send(JSON.stringify({ type: 'message', message }));
+    this.transcript.push(message);
     this.log({ type: 'outgoing', sender, content });
   }
 
@@ -214,6 +241,7 @@ class Session {
 
   async handleChat(content, clientInteractions) {
     this.mergeInteractions(clientInteractions);
+    this.recordTurn('user', content);
     this.log({ type: 'incoming', kind: 'chat', content, interactions: clientInteractions });
     await this.runTurn(content + this.interactionContext());
   }
@@ -222,8 +250,126 @@ class Session {
     this.interactions.push({ eventType, data, timestamp: Date.now() });
     if (this.interactions.length > 50) this.interactions = this.interactions.slice(-50);
     this.log({ type: 'incoming', kind: 'event', eventType, data });
+
+    if (eventType === 'load-view' && data && typeof data.name === 'string') {
+      this.handleLoad(data.name);
+      return;
+    }
+
     await this.runTurn(this.formatEventPrompt(eventType, data) + this.interactionContext());
   }
+
+  handleSave(name) {
+    if (!name || typeof name !== 'string') {
+      this.sendError('save: missing name');
+      return;
+    }
+    if (this.transcript.length === 0) {
+      this.sendError('save: nothing to save yet — chat first');
+      return;
+    }
+    const dir = viewDir(this.cwd);
+    fs.mkdirSync(dir, { recursive: true });
+    const payload = {
+      name,
+      cwd: this.cwd,
+      thread_id: this.threadId,
+      messages: this.transcript,
+      saved_at: Date.now(),
+    };
+    fs.writeFileSync(viewFile(this.cwd, name), JSON.stringify(payload, null, 2));
+    this.send('system', `saved "${name}" (${this.transcript.length} messages)`);
+  }
+
+  handleLoad(name) {
+    const file = viewFile(this.cwd, name);
+    if (!fs.existsSync(file)) {
+      this.sendError(`load: no view named "${name}" for this directory`);
+      return;
+    }
+    let saved;
+    try {
+      saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (err) {
+      this.sendError(`load: corrupt save file: ${err.message}`);
+      return;
+    }
+    this.threadId = saved.thread_id || null;
+    this.cwd = saved.cwd || this.cwd;
+    this.transcript = Array.isArray(saved.messages) ? saved.messages : [];
+    this.interactions = [];
+    this.ws.send(JSON.stringify({
+      type: 'restore',
+      name,
+      messages: this.transcript,
+    }));
+    this.log({ type: 'load', name, thread_id: this.threadId, cwd: this.cwd });
+  }
+
+  handleListViews() {
+    const dir = viewDir(this.cwd);
+    let items = [];
+    if (fs.existsSync(dir)) {
+      items = fs.readdirSync(dir)
+        .filter((f) => f.endsWith('.json'))
+        .map((f) => {
+          try {
+            const obj = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+            return {
+              name: obj.name,
+              saved: new Date(obj.saved_at).toISOString().slice(0, 10),
+              turns: Array.isArray(obj.messages) ? obj.messages.length : 0,
+            };
+          } catch { return null; }
+        })
+        .filter(Boolean)
+        .sort((a, b) => (a.name < b.name ? -1 : 1));
+    }
+    const jsx = renderViewsListJsx(items, this.cwd);
+    this.send('ai', `Saved views for \`${this.cwd}\`:\n\n\`\`\`shapeshiftui\n${jsx}\n\`\`\``);
+  }
+
+  handleDeleteView(name) {
+    const file = viewFile(this.cwd, name);
+    if (!fs.existsSync(file)) {
+      this.sendError(`delete: no view named "${name}"`);
+      return;
+    }
+    fs.unlinkSync(file);
+    this.send('system', `deleted "${name}"`);
+  }
+}
+
+function renderViewsListJsx(items, cwd) {
+  if (items.length === 0) {
+    return `() => (
+  <Box flexDirection="column">
+    <Text dimColor>No saved views for ${JSON.stringify(cwd)}.</Text>
+    <Text dimColor>Use /save &lt;name&gt; after a view is rendered.</Text>
+  </Box>
+)`;
+  }
+  return `({ submitEvent }) => {
+  const rows = ${JSON.stringify(items)};
+  return (
+    <Box flexDirection="column">
+      <Text bold>Saved views ({rows.length})</Text>
+      <Box marginTop={1} />
+      <Table
+        columns={[
+          { key: 'name', label: 'Name', width: 28 },
+          { key: 'saved', label: 'Saved', width: 12 },
+          { key: 'turns', label: 'Turns', width: 6, align: 'right' },
+        ]}
+        rows={rows}
+        onRowPress={(row) => submitEvent('load-view', { name: row.name })}
+      />
+      <Box marginTop={1}>
+        <Text dimColor>Click a row to load. /delete &lt;name&gt; to remove.</Text>
+      </Box>
+    </Box>
+  );
+}`;
 }
 
 const wss = new WebSocketServer({ port: PORT });
@@ -244,6 +390,14 @@ wss.on('connection', (ws) => {
       session.handleChat(msg.content, msg.interactions);
     } else if (msg.type === 'event') {
       session.handleEvent(msg.eventType, msg.data);
+    } else if (msg.type === 'save') {
+      session.handleSave(msg.name);
+    } else if (msg.type === 'load') {
+      session.handleLoad(msg.name);
+    } else if (msg.type === 'list-views') {
+      session.handleListViews();
+    } else if (msg.type === 'delete-view') {
+      session.handleDeleteView(msg.name);
     }
   });
 
