@@ -54,6 +54,9 @@ function viewFile(cwd, name) {
 const PORT = process.env.CODEX_BRIDGE_PORT || process.env.PORT || 8080;
 const CODEX_BIN = process.env.CODEX_BIN || 'codex';
 const SANDBOX = process.env.CODEX_SANDBOX || 'read-only';
+// Passed to codex as `-m <model>`. Empty → let codex pick its own default.
+const CODEX_MODEL = process.env.CODEX_MODEL || '';
+const MODEL_ARGS = CODEX_MODEL ? ['-m', CODEX_MODEL] : [];
 
 // Loaded once at startup. Prepended on the first turn of sessions whose cwd
 // is not the default (i.e. the client passed --cwd to run codex elsewhere).
@@ -225,8 +228,8 @@ class Session {
       ? `${CANONICAL_INSTRUCTIONS}\n\n---\n\nUser: ${prompt}`
       : prompt;
     const args = resume
-      ? ['exec', 'resume', this.threadId, '--json', '--skip-git-repo-check', finalPrompt]
-      : ['exec', '--json', '--skip-git-repo-check', '-s', SANDBOX, '-C', this.cwd, finalPrompt];
+      ? ['exec', 'resume', this.threadId, '--json', '--skip-git-repo-check', ...MODEL_ARGS, finalPrompt]
+      : ['exec', '--json', '--skip-git-repo-check', '-s', SANDBOX, '-C', this.cwd, ...MODEL_ARGS, finalPrompt];
 
     this.log({ type: 'codex-spawn', resume, threadId: this.threadId, cwd: this.cwd, preamble: needsPreamble, promptPreview: prompt.slice(0, 200) });
 
@@ -514,6 +517,7 @@ function renderViewsListJsx(items, cwd) {
 const wss = new WebSocketServer({ port: PORT });
 console.log(`shapeshiftui codex bridge on ws://localhost:${PORT}`);
 console.log(`  sandbox: ${SANDBOX}   binary: ${CODEX_BIN}   cwd: ${CODEX_CWD}`);
+console.log(`  model:   ${CODEX_MODEL || '(codex default)'}`);
 
 wss.on('connection', (ws) => {
   const session = new Session(ws);
