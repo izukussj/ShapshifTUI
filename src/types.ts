@@ -1,10 +1,28 @@
 export type Sender = 'user' | 'ai' | 'system';
 
+export type ErrorSeverity = 'info' | 'warn' | 'error';
+export type ErrorSource = 'bridge' | 'runtime' | 'sandbox' | 'network' | 'codex' | 'user';
+
+/**
+ * Canonical error shape across the wire and inside the client. Classified at
+ * origin so the sink can render, log, and derive persistent state without
+ * pattern-matching strings.
+ */
+export interface AppError {
+  source: ErrorSource;
+  code: string;
+  message: string;
+  severity: ErrorSeverity;
+  recoverable: boolean;
+  details?: unknown;
+}
+
 export interface ChatMessage {
   id: string;
   sender: Sender;
   content: string;
   timestamp: number;
+  severity?: ErrorSeverity;
 }
 
 export interface InteractionRecord {
@@ -26,11 +44,10 @@ export interface ApprovalRequest {
  */
 export type ServerMessage =
   | { type: 'message'; message: ChatMessage }
-  | { type: 'error'; error: string }
+  | { type: 'error'; error: AppError }
   | { type: 'status'; text: string | null }
   | { type: 'restore'; name: string; messages: ChatMessage[] }
-  | { type: 'approval_request'; request: ApprovalRequest }
-  | { type: 'notice'; level: 'error' | 'warning' | 'info'; text: string };
+  | { type: 'approval_request'; request: ApprovalRequest };
 
 export type ClientMessage =
   | { type: 'init'; cwd: string }

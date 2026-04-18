@@ -4,6 +4,7 @@ import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import { compileComponent, type SendEvent, type SubmitEvent, type InteractionContext } from './sandbox.js';
 import { runtimeGlobals } from './runtime-globals.js';
+import type { AppError } from './types.js';
 
 interface RuntimeProps {
   source: string | null;
@@ -11,7 +12,7 @@ interface RuntimeProps {
   submitEvent: SubmitEvent;
   context: InteractionContext;
   focused: boolean;
-  onCompileError: (error: string) => void;
+  onCompileError: (error: AppError) => void;
 }
 
 export function Runtime({ source, sendEvent, submitEvent, context, focused, onCompileError }: RuntimeProps): React.ReactElement {
@@ -44,10 +45,17 @@ export function Runtime({ source, sendEvent, submitEvent, context, focused, onCo
     return compileComponent(source, globals);
   }, [source, globals]);
 
-  // Auto-retry: notify parent on compile failure.
+  // Auto-retry: notify parent on compile failure with a structured AppError.
   useEffect(() => {
     if (compiled && !compiled.ok) {
-      onCompileError(compiled.error);
+      onCompileError({
+        source: 'sandbox',
+        code: 'compile_failed',
+        severity: 'error',
+        recoverable: true,
+        message: compiled.error,
+        details: { error: compiled.error },
+      });
     }
   }, [compiled, onCompileError]);
 

@@ -26,6 +26,23 @@ function cwdHash(cwd) {
   return crypto.createHash('sha1').update(cwd).digest('hex').slice(0, 12);
 }
 
+/**
+ * Build a structured AppError. Matches the shape in src/types.ts. Keep this
+ * the single way errors leave the bridge — every sendError call gets one.
+ */
+function buildError({ source = 'bridge', code, message, severity = 'error', recoverable = true, details }) {
+  return { source, code, message, severity, recoverable, details };
+}
+
+/**
+ * Log a swallowed/silent error to stderr with structured context. Replaces
+ * bare `catch {}` — dev gets full context, user sees nothing (these are
+ * internal parse failures, not actionable).
+ */
+function logSilent(code, message, err) {
+  console.error('[shapeshiftui]', { source: 'bridge', code, message, err: err?.message ?? String(err) });
+}
+
 function viewDir(cwd) {
   return path.join(VIEWS_DIR, cwdHash(cwd));
 }
@@ -109,7 +126,13 @@ class Session {
     if (typeof cwd !== 'string' || !cwd) return;
     const resolved = path.resolve(cwd);
     if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
-      this.sendError(`--cwd path does not exist or is not a directory: ${resolved}`);
+      this.emitError({
+        source: 'user',
+        code: 'bad_cwd',
+        severity: 'error',
+        recoverable: true,
+        message: `--cwd path does not exist or is not a directory: ${resolved}`,
+      });
       return;
     }
     this.cwd = resolved;
@@ -139,35 +162,14 @@ class Session {
     this.log({ type: 'error', error });
   }
 
+  // Shortcut: build + send in one call. Keeps call sites terse.
+  emitError(fields) {
+    this.sendError(buildError(fields));
+  }
+
   sendStatus(text) {
     this.ws.send(JSON.stringify({ type: 'status', text }));
     this.log({ type: 'status', text });
-  }
-
-  sendNotice(level, text) {
-    this.ws.send(JSON.stringify({ type: 'notice', level, text }));
-    this.log({ type: 'notice', level, text });
-  }
-
-  maybePromoteSandboxDenial(text) {
-    // Codex wraps blocked commands' stderr inside agent_message prose. Surface
-    // the underlying OS denial as a vim-style bar so users don't have to read
-    // the chat wall to notice a write was blocked by the sandbox.
-    const patterns = [
-      /Operation not permitted/,
-      /Read-only file system/,
-      /Permission denied/,
-      /sandbox (?:is )?read-only/i,
-      /blocked by the (?:read-only )?sandbox/i,
-    ];
-    for (const re of patterns) {
-      const m = text.match(re);
-      if (m) {
-        const line = text.split('\n').find((l) => re.test(l)) ?? m[0];
-        this.sendNotice('error', line.trim().slice(0, 200));
-        return;
-      }
-    }
   }
 
   mergeInteractions(incoming) {
@@ -267,7 +269,6 @@ class Session {
           if (evt.type === 'item.completed' && evt.item?.type === 'agent_message' && typeof evt.item.text === 'string') {
             anyOutput = true;
             this.send('ai', evt.item.text);
-            this.maybePromoteSandboxDenial(evt.item.text);
             continue;
           }
 
@@ -278,11 +279,18 @@ class Session {
 
           if (evt.type === 'turn.failed') {
             const detail = JSON.stringify(evt.error ?? {}).slice(0, 200);
-            this.sendError(`turn failed: ${detail}`);
+            this.emitError({
+              source: 'codex',
+              code: 'turn_failed',
+              severity: 'error',
+              recoverable: true,
+              message: `turn failed: ${detail}`,
+              details: evt.error ?? null,
+            });
             continue;
           }
-        } catch {
-          // ignore non-JSON line
+        } catch (err) {
+          logSilent('codex_stdout_parse_failed', 'codex emitted a non-JSON line; dropped', err);
         }
       }
     });
@@ -299,18 +307,38 @@ class Session {
         return;
       }
       if (code !== 0) {
-        this.sendError(`codex exited with code ${code}${stderrBuf ? `: ${stderrBuf.trim().slice(-500)}` : ''}`);
+        this.emitError({
+          source: 'codex',
+          code: 'exit_nonzero',
+          severity: 'error',
+          recoverable: true,
+          message: `codex exited with code ${code}${stderrBuf ? `: ${stderrBuf.trim().slice(-500)}` : ''}`,
+          details: { exitCode: code, stderrTail: stderrBuf.trim().slice(-2000) },
+        });
         return;
       }
       if (!anyOutput) {
-        this.sendError('codex finished without producing a message');
+        this.emitError({
+          source: 'codex',
+          code: 'no_output',
+          severity: 'warn',
+          recoverable: true,
+          message: 'codex finished without producing a message',
+        });
       }
     });
 
     child.on('error', (err) => {
       this.busy = false;
       this.currentChild = null;
-      this.sendError(`Failed to launch codex (${CODEX_BIN}): ${err.message}`);
+      this.emitError({
+        source: 'codex',
+        code: 'spawn_failed',
+        severity: 'error',
+        recoverable: false,
+        message: `Failed to launch codex (${CODEX_BIN}): ${err.message}`,
+        details: { bin: CODEX_BIN, err: err.message },
+      });
     });
   }
 
@@ -350,11 +378,11 @@ class Session {
 
   handleSave(name) {
     if (!name || typeof name !== 'string') {
-      this.sendError('save: missing name');
+      this.emitError({ source: 'user', code: 'bad_args', severity: 'info', recoverable: true, message: 'save: missing name' });
       return;
     }
     if (this.transcript.length === 0) {
-      this.sendError('save: nothing to save yet — chat first');
+      this.emitError({ source: 'user', code: 'empty_transcript', severity: 'info', recoverable: true, message: 'save: nothing to save yet — chat first' });
       return;
     }
     const dir = viewDir(this.cwd);
@@ -373,14 +401,27 @@ class Session {
   handleLoad(name) {
     const file = viewFile(this.cwd, name);
     if (!fs.existsSync(file)) {
-      this.sendError(`load: no view named "${name}" for this directory`);
+      this.emitError({
+        source: 'user',
+        code: 'view_not_found',
+        severity: 'info',
+        recoverable: true,
+        message: `load: no view named "${name}" for this directory`,
+      });
       return;
     }
     let saved;
     try {
       saved = JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (err) {
-      this.sendError(`load: corrupt save file: ${err.message}`);
+      this.emitError({
+        source: 'bridge',
+        code: 'view_corrupt',
+        severity: 'warn',
+        recoverable: true,
+        message: `load: corrupt save file: ${err.message}`,
+        details: { file, err: err.message },
+      });
       return;
     }
     this.threadId = saved.thread_id || null;
@@ -409,7 +450,10 @@ class Session {
               saved: new Date(obj.saved_at).toISOString().slice(0, 10),
               turns: Array.isArray(obj.messages) ? obj.messages.length : 0,
             };
-          } catch { return null; }
+          } catch (err) {
+            logSilent('view_corrupt', `list-views: skipping unreadable save ${f}`, err);
+            return null;
+          }
         })
         .filter(Boolean)
         .sort((a, b) => (a.name < b.name ? -1 : 1));
@@ -421,7 +465,13 @@ class Session {
   handleDeleteView(name) {
     const file = viewFile(this.cwd, name);
     if (!fs.existsSync(file)) {
-      this.sendError(`delete: no view named "${name}"`);
+      this.emitError({
+        source: 'user',
+        code: 'view_not_found',
+        severity: 'info',
+        recoverable: true,
+        message: `delete: no view named "${name}"`,
+      });
       return;
     }
     fs.unlinkSync(file);
@@ -472,7 +522,12 @@ wss.on('connection', (ws) => {
 
   ws.on('message', (raw) => {
     let msg;
-    try { msg = JSON.parse(raw.toString()); } catch { return; }
+    try {
+      msg = JSON.parse(raw.toString());
+    } catch (err) {
+      logSilent('wire_parse_failed', 'client sent non-JSON message; dropped', err);
+      return;
+    }
     if (msg.type === 'init') {
       session.handleInit(msg);
     } else if (msg.type === 'chat') {

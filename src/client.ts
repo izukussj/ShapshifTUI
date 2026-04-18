@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import type { ClientMessage, ServerMessage } from './types.js';
+import type { AppError, ChatMessage, ClientMessage, ServerMessage } from './types.js';
 
 type Listener = (msg: ServerMessage) => void;
 
@@ -17,6 +17,24 @@ export class Client {
     this.ready = this.connect();
   }
 
+  private emit(msg: ServerMessage): void {
+    for (const l of this.listeners) l(msg);
+  }
+
+  private emitError(err: AppError): void {
+    this.emit({ type: 'error', error: err });
+  }
+
+  private emitSystem(content: string): void {
+    const message: ChatMessage = {
+      id: `sys-${Date.now()}`,
+      sender: 'system',
+      content,
+      timestamp: Date.now(),
+    };
+    this.emit({ type: 'message', message });
+  }
+
   private connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url);
@@ -27,10 +45,16 @@ export class Client {
         let parsed: ServerMessage;
         try {
           parsed = JSON.parse(data.toString());
-        } catch {
+        } catch (err) {
+          console.error('[shapeshiftui]', {
+            source: 'network',
+            code: 'wire_parse_failed',
+            message: 'server sent non-JSON frame; dropped',
+            err: err instanceof Error ? err.message : String(err),
+          });
           return;
         }
-        for (const l of this.listeners) l(parsed);
+        this.emit(parsed);
       });
 
       this.ws.on('close', () => {
@@ -40,36 +64,47 @@ export class Client {
   }
 
   private async reconnect(): Promise<void> {
+    // One notice at the start of the backoff — not one per attempt. Subsequent
+    // retries are silent unless they all fail.
+    const firstDelay = RECONNECT_DELAYS[0] ?? 1000;
+    this.emitError({
+      source: 'network',
+      code: 'ws_disconnected',
+      severity: 'warn',
+      recoverable: true,
+      message: `disconnected — reconnecting in ${firstDelay / 1000}s...`,
+    });
+
     for (const delay of RECONNECT_DELAYS) {
       if (this.closed) return;
-      // Notify listeners of reconnect attempt.
-      const sysMsg: ServerMessage = {
-        type: 'error',
-        error: `Disconnected. Reconnecting in ${delay / 1000}s...`,
-      };
-      for (const l of this.listeners) l(sysMsg);
-
       await new Promise((r) => setTimeout(r, delay));
       if (this.closed) return;
 
       try {
         await this.connect();
-        const okMsg: ServerMessage = {
-          type: 'error',
-          error: 'Reconnected.',
-        };
-        for (const l of this.listeners) l(okMsg);
+        // Success is not an error — send as a system chat message.
+        this.emitSystem('reconnected');
         return;
-      } catch {
-        // try next delay
+      } catch (err) {
+        // Transient — the next backoff tick retries. Log for debug; surfacing
+        // every failed attempt would spam the user. If every delay fails we
+        // emit the terminal ws_lost error below.
+        console.error('[shapeshiftui]', {
+          source: 'network',
+          code: 'reconnect_attempt_failed',
+          message: `reconnect after ${delay}ms failed`,
+          err: err instanceof Error ? err.message : String(err),
+        });
       }
     }
 
-    const failMsg: ServerMessage = {
-      type: 'error',
-      error: 'Connection lost. Restart the app.',
-    };
-    for (const l of this.listeners) l(failMsg);
+    this.emitError({
+      source: 'network',
+      code: 'ws_lost',
+      severity: 'error',
+      recoverable: false,
+      message: 'connection lost — restart the app',
+    });
   }
 
   async waitForOpen(): Promise<void> {

@@ -22,6 +22,14 @@ const MODEL = process.env.MODEL || 'gpt-5.4';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+function buildError({ source = 'bridge', code, message, severity = 'error', recoverable = true, details }) {
+  return { source, code, message, severity, recoverable, details };
+}
+
+function logSilent(code, message, err) {
+  console.error('[shapeshiftui]', { source: 'bridge', code, message, err: err?.message ?? String(err) });
+}
+
 const SYSTEM_PROMPT = `You are ShapeshifTUI, an AI that builds interactive terminal interfaces. When the user asks for a UI, you respond with a JSX component inside a \\\`\\\`\\\`shapeshiftui fenced code block.
 
 ## Component contract
@@ -129,6 +137,12 @@ class Session {
     this.log({ type: 'outgoing', sender, content });
   }
 
+  emitError(fields) {
+    const error = buildError(fields);
+    this.ws.send(JSON.stringify({ type: 'error', error }));
+    this.log({ type: 'error', error });
+  }
+
   async handleChat(content, clientInteractions) {
     // Merge incoming interactions into session history.
     if (clientInteractions?.length) {
@@ -170,9 +184,14 @@ class Session {
 
       this.send('ai', reply);
     } catch (err) {
-      const errMsg = `API error: ${err.message}`;
-      this.send('system', errMsg);
-      this.log({ type: 'error', error: errMsg });
+      this.emitError({
+        source: 'bridge',
+        code: 'openai_call_failed',
+        severity: 'error',
+        recoverable: true,
+        message: `API error: ${err.message}`,
+        details: { err: err.message },
+      });
     }
   }
 
@@ -204,9 +223,14 @@ class Session {
 
       this.send('ai', reply);
     } catch (err) {
-      const errMsg = `API error: ${err.message}`;
-      this.send('system', errMsg);
-      this.log({ type: 'error', error: errMsg });
+      this.emitError({
+        source: 'bridge',
+        code: 'openai_call_failed',
+        severity: 'error',
+        recoverable: true,
+        message: `API error: ${err.message}`,
+        details: { err: err.message },
+      });
     }
   }
 }
@@ -223,7 +247,8 @@ wss.on('connection', (ws) => {
     let msg;
     try {
       msg = JSON.parse(raw.toString());
-    } catch {
+    } catch (err) {
+      logSilent('wire_parse_failed', 'client sent non-JSON message; dropped', err);
       return;
     }
 
