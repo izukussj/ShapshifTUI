@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import type { ChatMessage } from './types.js';
@@ -7,14 +7,21 @@ interface SlashCommand {
   name: string;
   args: string;
   help: string;
+  example: string;
 }
 
 const COMMANDS: SlashCommand[] = [
-  { name: '/save', args: '<name>', help: 'save the current view for later' },
-  { name: '/load', args: '<name>', help: 'restore a saved view' },
-  { name: '/views', args: '', help: 'list saved views (clickable)' },
-  { name: '/delete', args: '<name>', help: 'remove a saved view' },
-  { name: '/help', args: '', help: 'show this list' },
+  { name: '/save', args: '<name>', help: 'save the current view for later', example: '/save dashboard' },
+  { name: '/load', args: '<name>', help: 'restore a saved view', example: '/load dashboard' },
+  { name: '/views', args: '', help: 'list saved views', example: '/views' },
+  { name: '/delete', args: '<name>', help: 'remove a saved view', example: '/delete dashboard' },
+  { name: '/help', args: '', help: 'show all commands', example: '/help' },
+];
+
+const EXAMPLE_PROMPTS = [
+  'a todo list with priority tags',
+  'a pomodoro timer with start/pause',
+  'a markdown cheatsheet I can scroll',
 ];
 
 interface ChatProps {
@@ -27,6 +34,7 @@ interface ChatProps {
 
 export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatProps): React.ReactElement {
   const [draft, setDraft] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const { stdout } = useStdout();
 
   // Slash-command autocomplete. Only active when the draft starts with "/" and
@@ -36,15 +44,39 @@ export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatPro
     ? COMMANDS.filter((c) => c.name.startsWith(draft))
     : [];
 
-  useInput((input, key) => {
-    if (!focused) return;
-    if (key.tab && suggestions.length > 0) {
-      const top = suggestions[0]!;
-      setDraft(top.args ? `${top.name} ` : top.name);
+  // Clamp selection to current suggestion count. Resets to 0 when the user
+  // types (suggestions filter), stays valid when wrapping with arrows.
+  useEffect(() => {
+    setSelectedIndex((i) => (suggestions.length === 0 ? 0 : Math.min(i, suggestions.length - 1)));
+  }, [suggestions.length]);
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [draft]);
+
+  const accept = () => {
+    const picked = suggestions[selectedIndex] ?? suggestions[0];
+    if (!picked) return;
+    setDraft(picked.args ? `${picked.name} ` : picked.name);
+  };
+
+  useInput((_input, key) => {
+    if (!focused || suggestions.length === 0) return;
+    if (key.upArrow) {
+      setSelectedIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
+    } else if (key.downArrow) {
+      setSelectedIndex((i) => (i + 1) % suggestions.length);
+    } else if (key.tab) {
+      accept();
     }
   }, { isActive: focused });
 
   const submit = (value: string) => {
+    // Enter while the slash menu is open completes the selection instead of
+    // sending — avoids shipping half-typed "/sa" as a literal message.
+    if (suggestions.length > 0) {
+      accept();
+      return;
+    }
     const trimmed = value.trim();
     if (!trimmed) return;
     onSend(trimmed);
@@ -53,7 +85,7 @@ export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatPro
 
   // Reserve border (2) + padding (2) + input (1); add lines for scrollback hint
   // and suggestion rows so the message window shrinks rather than overflows.
-  const suggestionLines = suggestions.length > 0 ? suggestions.length + 1 : 0;
+  const suggestionLines = suggestions.length > 0 ? suggestions.length + 2 : 0;
   const reserved = 5 + (scrollOffset > 0 ? 1 : 0) + suggestionLines;
   const maxVisible = Math.max(1, stdout.rows - reserved);
   const end = Math.max(0, messages.length - scrollOffset);
@@ -64,7 +96,7 @@ export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatPro
 
   return (
     <Box
-      borderStyle="round"
+      borderStyle={focused ? 'bold' : 'round'}
       borderColor={focused ? 'cyan' : 'gray'}
       padding={1}
       flexDirection="column"
@@ -80,7 +112,7 @@ export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatPro
       ) : null}
       <Box flexDirection="column" flexGrow={1}>
         {visible.length === 0 ? (
-          <Text dimColor>Type a message to get started.</Text>
+          <EmptyChat />
         ) : (
           visible.map((m, i) => {
             const prev = i > 0 ? visible[i - 1] : null;
@@ -90,29 +122,77 @@ export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatPro
         )}
       </Box>
       {suggestions.length > 0 ? (
-        <Box flexDirection="column" marginBottom={0}>
-          <Text dimColor>— Tab completes —</Text>
-          {suggestions.map((c, i) => (
-            <Box key={c.name}>
-              <Box width={12}>
-                <Text color={i === 0 ? 'cyan' : undefined} bold={i === 0}>{c.name}</Text>
-              </Box>
-              <Box width={12}>
-                <Text dimColor>{c.args}</Text>
-              </Box>
-              <Text dimColor>{c.help}</Text>
-            </Box>
-          ))}
-        </Box>
+        <SuggestionPanel
+          suggestions={suggestions}
+          selectedIndex={selectedIndex}
+        />
       ) : null}
       <Box>
-        <Text color={focused ? 'cyan' : 'gray'}>{'> '}</Text>
+        <Text color={focused ? 'cyan' : 'gray'} bold={focused}>{'❯ '}</Text>
         <TextInput
           value={draft}
           onChange={setDraft}
           onSubmit={submit}
           focus={focused}
         />
+      </Box>
+    </Box>
+  );
+}
+
+function EmptyChat(): React.ReactElement {
+  return (
+    <Box flexDirection="column" paddingY={1}>
+      <Text bold color="cyan">Welcome to ShapeshifTUI</Text>
+      <Text dimColor>Describe a UI in plain English — I'll build it in the pane next door.</Text>
+      <Box marginTop={1} flexDirection="column">
+        <Text dimColor>Try asking for:</Text>
+        {EXAMPLE_PROMPTS.map((p) => (
+          <Box key={p}>
+            <Text color="green">  › </Text>
+            <Text>{p}</Text>
+          </Box>
+        ))}
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>Type </Text>
+        <Text color="yellow">/</Text>
+        <Text dimColor> for commands.</Text>
+      </Box>
+    </Box>
+  );
+}
+
+interface SuggestionPanelProps {
+  suggestions: SlashCommand[];
+  selectedIndex: number;
+}
+
+function SuggestionPanel({ suggestions, selectedIndex }: SuggestionPanelProps): React.ReactElement {
+  const selected = suggestions[selectedIndex] ?? suggestions[0]!;
+  return (
+    <Box flexDirection="column" marginBottom={0}>
+      {suggestions.map((c, i) => {
+        const active = i === selectedIndex;
+        return (
+          <Box key={c.name}>
+            <Box width={2}>
+              <Text color="cyan" bold>{active ? '▸' : ' '}</Text>
+            </Box>
+            <Box width={10}>
+              <Text color={active ? 'cyan' : undefined} bold={active}>{c.name}</Text>
+            </Box>
+            <Box width={10}>
+              <Text dimColor>{c.args}</Text>
+            </Box>
+            <Text dimColor>{c.help}</Text>
+          </Box>
+        );
+      })}
+      <Box marginTop={0}>
+        <Text dimColor>↑↓ navigate · </Text>
+        <Text dimColor>Tab/Enter accepts · e.g. </Text>
+        <Text color="cyan">{selected.example}</Text>
       </Box>
     </Box>
   );

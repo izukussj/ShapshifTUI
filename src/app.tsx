@@ -33,6 +33,7 @@ export function App({ client }: AppProps): React.ReactElement {
   // Derived from AppError codes from the network layer. Drives the StatusLine
   // dot for conditions that persist longer than a single chat entry.
   const [connectionState, setConnectionState] = useState<ConnectionState>('connected');
+  const [helpOpen, setHelpOpen] = useState(false);
   const retryCount = useRef(0);
 
   const respondToApproval = useCallback(
@@ -47,16 +48,19 @@ export function App({ client }: AppProps): React.ReactElement {
     if (key.ctrl && _input === 'c') exit();
     if (key.ctrl && _input === 'a') setActivePane('chat');
     if (key.ctrl && _input === 'e') setActivePane('runtime');
+    if (key.ctrl && _input === 'k') setHelpOpen((v) => !v);
     if (key.ctrl && _input === 'p') {
       const next = setMouseEnabled(!mouseOn);
       setMouseOn(next);
       setStatus(next ? 'mouse on — hold Option to select text' : 'mouse off — text selection restored');
     }
 
-    // Esc: cancel in priority order — pending approval → active turn.
+    // Esc: cancel in priority order — help → pending approval → active turn.
     const pending = approvals[0];
     if (key.escape) {
-      if (pending) {
+      if (helpOpen) {
+        setHelpOpen(false);
+      } else if (pending) {
         respondToApproval(pending.id, false);
       } else if (status) {
         client.send({ type: 'cancel' });
@@ -280,6 +284,7 @@ export function App({ client }: AppProps): React.ReactElement {
           ) : null}
         </Box>
       </FocusActiveContext.Provider>
+      {helpOpen ? <CheatsheetModal mouseOn={mouseOn} /> : null}
       {pendingApproval ? (
         <ApprovalBanner
           request={pendingApproval}
@@ -293,9 +298,11 @@ export function App({ client }: AppProps): React.ReactElement {
         <Text dimColor>
           {pendingApproval
             ? 'Enter: approve  ·  Tab then Enter: deny  ·  Esc: cancel'
-            : status
-              ? `Esc: cancel turn  ·  Ctrl+A/E: panes  ·  PgUp/Dn: scroll  ·  Ctrl+C: quit`
-              : `Ctrl+A: chat  Ctrl+E: component  Ctrl+P: mouse (${mouseOn ? 'on' : 'off'})  PgUp/Dn: scroll  Ctrl+C: quit`}
+            : helpOpen
+              ? 'Esc: close help  ·  Ctrl+K: toggle'
+              : status
+                ? 'Esc: cancel turn  ·  Ctrl+K: help  ·  Ctrl+C: quit'
+                : 'Ctrl+A/E: panes  ·  Ctrl+K: help  ·  Ctrl+C: quit'}
         </Text>
       </Box>
     </Box>
@@ -356,6 +363,74 @@ function StatusLine({ status }: StatusLineProps): React.ReactElement {
       <Spinner />
       <Text> </Text>
       <Text dimColor italic>{status}</Text>
+    </Box>
+  );
+}
+
+interface CheatsheetRow {
+  keys: string;
+  label: string;
+}
+
+interface CheatsheetGroup {
+  title: string;
+  rows: CheatsheetRow[];
+}
+
+// Ctrl+K-toggled panel. Sits above the status line so the main panes stay
+// legible underneath — closes with Esc or Ctrl+K. Content is authored here
+// rather than generated, because the bindings live across app.tsx and chat.tsx
+// and a stale cheatsheet is worse than a short one.
+function CheatsheetModal({ mouseOn }: { mouseOn: boolean }): React.ReactElement {
+  const groups: CheatsheetGroup[] = [
+    {
+      title: 'Panes',
+      rows: [
+        { keys: 'Ctrl+A', label: 'focus chat' },
+        { keys: 'Ctrl+E', label: 'focus component' },
+        { keys: 'PgUp / PgDn', label: 'scroll chat history' },
+      ],
+    },
+    {
+      title: 'Chat input',
+      rows: [
+        { keys: '/', label: 'open command menu' },
+        { keys: '↑ / ↓', label: 'navigate slash suggestions' },
+        { keys: 'Tab / Enter', label: 'accept selected suggestion' },
+      ],
+    },
+    {
+      title: 'App',
+      rows: [
+        { keys: 'Ctrl+K', label: 'toggle this help' },
+        { keys: 'Ctrl+P', label: `toggle mouse (${mouseOn ? 'on' : 'off'})` },
+        { keys: 'Esc', label: 'cancel turn / close dialog' },
+        { keys: 'Ctrl+C', label: 'quit' },
+      ],
+    },
+  ];
+
+  return (
+    <Box borderStyle="double" borderColor="cyan" paddingX={1} flexDirection="column">
+      <Box>
+        <Text bold color="cyan">? Keybindings</Text>
+        <Text dimColor>  ·  Esc or Ctrl+K to close</Text>
+      </Box>
+      <Box flexDirection="row" marginTop={1}>
+        {groups.map((g, i) => (
+          <Box key={g.title} flexDirection="column" marginRight={i < groups.length - 1 ? 3 : 0}>
+            <Text bold>{g.title}</Text>
+            {g.rows.map((r) => (
+              <Box key={r.keys}>
+                <Box width={14}>
+                  <Text color="green">{r.keys}</Text>
+                </Box>
+                <Text dimColor>{r.label}</Text>
+              </Box>
+            ))}
+          </Box>
+        ))}
+      </Box>
     </Box>
   );
 }
