@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
+import React, { useEffect, useState, type MutableRefObject } from 'react';
+import { Box, Text, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import type { ChatMessage } from './types.js';
 
@@ -30,12 +30,18 @@ interface ChatProps {
   focused: boolean;
   scrollOffset: number;
   width: number | string;
+  // Rows allocated to the chat pane by the flex parent (terminal height minus
+  // app chrome). Used to slice messages so the chat never overflows its box —
+  // overflow scrolls the whole frame and clips the top header row.
+  availableRows: number;
+  // Mutated each render to signal whether Tab should be consumed by the chat
+  // (slash menu open) or pass through to the app-level Tab pane-switch.
+  captureTabRef: MutableRefObject<boolean>;
 }
 
-export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatProps): React.ReactElement {
+export function Chat({ messages, onSend, focused, scrollOffset, width, availableRows, captureTabRef }: ChatProps): React.ReactElement {
   const [draft, setDraft] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const { stdout } = useStdout();
 
   // Slash-command autocomplete. Only active when the draft starts with "/" and
   // the user hasn't typed a space yet — once they're on args, suggestions hide.
@@ -43,6 +49,10 @@ export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatPro
   const suggestions = slashInput
     ? COMMANDS.filter((c) => c.name.startsWith(draft))
     : [];
+
+  // Report whether the chat owns Tab right now. Idempotent ref write in render
+  // is cheap and avoids an effect-tick lag against the Tab handler in app.tsx.
+  captureTabRef.current = focused && suggestions.length > 0;
 
   // Clamp selection to current suggestion count. Resets to 0 when the user
   // types (suggestions filter), stays valid when wrapping with arrows.
@@ -103,7 +113,7 @@ export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatPro
   // and suggestion rows so the message window shrinks rather than overflows.
   const suggestionLines = suggestions.length > 0 ? suggestions.length + 2 : 0;
   const reserved = 5 + (scrollOffset > 0 ? 1 : 0) + suggestionLines;
-  const maxVisible = Math.max(1, stdout.rows - reserved);
+  const maxVisible = Math.max(1, availableRows - reserved);
   const end = Math.max(0, messages.length - scrollOffset);
   const start = Math.max(0, end - maxVisible);
   const visible = messages.slice(start, end);

@@ -35,6 +35,9 @@ export function App({ client }: AppProps): React.ReactElement {
   const [connectionState, setConnectionState] = useState<ConnectionState>('connected');
   const [helpOpen, setHelpOpen] = useState(false);
   const retryCount = useRef(0);
+  // Chat toggles this when its slash-suggestion menu is open so the app-level
+  // Tab handler yields to the chat's Tab-accept behavior.
+  const chatCapturesTab = useRef(false);
 
   const respondToApproval = useCallback(
     (id: string, approved: boolean) => {
@@ -65,6 +68,13 @@ export function App({ client }: AppProps): React.ReactElement {
       } else if (status) {
         client.send({ type: 'cancel' });
       }
+      return;
+    }
+
+    // Tab switches panes. Yields to chat when its slash menu is open (Tab
+    // accepts the suggestion there) and to approval dialogs.
+    if (key.tab && !pending && !helpOpen && !chatCapturesTab.current) {
+      setActivePane((p) => (p === 'chat' ? 'runtime' : 'chat'));
       return;
     }
 
@@ -263,21 +273,36 @@ export function App({ client }: AppProps): React.ReactElement {
   const showChat = !narrow || activePane === 'chat';
   const showRuntime = !narrow || activePane === 'runtime';
 
+  // Rough accounting of the app chrome outside the panes so Chat doesn't
+  // over-reserve and overflow its allocation (which would scroll the header
+  // off the top of the terminal).
+  const chromeRows =
+    1 /* header */ +
+    1 /* bottom hint */ +
+    (status ? 1 : 0) +
+    (pendingApproval ? 6 : 0) +
+    (helpOpen ? 10 : 0);
+  const availableRows = Math.max(5, stdout.rows - chromeRows);
+
   return (
     <Box flexDirection="column" width={stdout.columns} height={stdout.rows}>
       <Header connectionState={connectionState} />
-      <FocusActiveContext.Provider value={!pendingApproval}>
-        <Box flexDirection="row" flexGrow={1}>
-          {showChat ? (
+      <Box flexDirection="row" flexGrow={1}>
+        {showChat ? (
+          <FocusActiveContext.Provider value={activePane === 'chat' && !pendingApproval}>
             <Chat
               messages={messages}
               onSend={onSend}
               focused={activePane === 'chat' && !pendingApproval}
               scrollOffset={scrollOffset}
               width={chatWidth}
+              availableRows={availableRows}
+              captureTabRef={chatCapturesTab}
             />
-          ) : null}
-          {showRuntime ? (
+          </FocusActiveContext.Provider>
+        ) : null}
+        {showRuntime ? (
+          <FocusActiveContext.Provider value={activePane === 'runtime' && !pendingApproval}>
             <Box flexGrow={1} flexDirection="column">
               <Runtime
                 source={source}
@@ -288,9 +313,9 @@ export function App({ client }: AppProps): React.ReactElement {
                 onCompileError={onCompileError}
               />
             </Box>
-          ) : null}
-        </Box>
-      </FocusActiveContext.Provider>
+          </FocusActiveContext.Provider>
+        ) : null}
+      </Box>
       {helpOpen ? <CheatsheetModal mouseOn={mouseOn} /> : null}
       {pendingApproval ? (
         <ApprovalBanner
