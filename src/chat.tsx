@@ -22,9 +22,10 @@ interface ChatProps {
   onSend: (content: string) => void;
   focused: boolean;
   scrollOffset: number;
+  width: number | string;
 }
 
-export function Chat({ messages, onSend, focused, scrollOffset }: ChatProps): React.ReactElement {
+export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatProps): React.ReactElement {
   const [draft, setDraft] = useState('');
   const { stdout } = useStdout();
 
@@ -67,7 +68,7 @@ export function Chat({ messages, onSend, focused, scrollOffset }: ChatProps): Re
       borderColor={focused ? 'cyan' : 'gray'}
       padding={1}
       flexDirection="column"
-      width="40%"
+      width={width}
       flexGrow={1}
     >
       {scrollOffset > 0 ? (
@@ -81,7 +82,11 @@ export function Chat({ messages, onSend, focused, scrollOffset }: ChatProps): Re
         {visible.length === 0 ? (
           <Text dimColor>Type a message to get started.</Text>
         ) : (
-          visible.map((m) => <ChatLine key={m.id} message={m} />)
+          visible.map((m, i) => {
+            const prev = i > 0 ? visible[i - 1] : null;
+            const topGap = !!prev && prev.sender !== m.sender;
+            return <ChatLine key={m.id} message={m} topGap={topGap} />;
+          })
         )}
       </Box>
       {suggestions.length > 0 ? (
@@ -113,18 +118,34 @@ export function Chat({ messages, onSend, focused, scrollOffset }: ChatProps): Re
   );
 }
 
-function ChatLine({ message }: { message: ChatMessage }): React.ReactElement {
-  const color =
-    message.sender === 'user' ? 'green' : message.sender === 'ai' ? 'cyan' : 'yellow';
-  const label =
-    message.sender === 'user' ? 'you' : message.sender === 'ai' ? 'ai' : 'sys';
+interface ChatLineStyle {
+  bullet: string;
+  label: string;
+  color: string;
+  bold: boolean;
+}
+
+// (sender, severity) → bullet + label + color. Bullet is the visual anchor
+// (scanning a long chat reads as colored dots), label is secondary context.
+function styleFor(message: ChatMessage): ChatLineStyle {
+  if (message.sender === 'user') return { bullet: '●', label: 'you', color: 'green', bold: false };
+  if (message.sender === 'ai') return { bullet: '◆', label: 'ai', color: 'cyan', bold: false };
+  if (message.severity === 'error') return { bullet: '✗', label: 'err', color: 'red', bold: true };
+  if (message.severity === 'warn') return { bullet: '▲', label: 'warn', color: 'yellow', bold: true };
+  return { bullet: '○', label: 'sys', color: 'yellow', bold: false };
+}
+
+function ChatLine({ message, topGap }: { message: ChatMessage; topGap: boolean }): React.ReactElement {
+  const { bullet, label, color, bold } = styleFor(message);
   // Strip shapeshiftui code blocks from rendered chat — they're noise once mounted.
   const content = message.content.replace(/```shapeshiftui\s*\n[\s\S]*?```/g, '').trim();
-  if (!content) return <Text color={color}>{label}: <Text dimColor>(layout)</Text></Text>;
+  const body = content || '(layout)';
+  const bodyDim = !content;
   return (
-    <Box>
-      <Text color={color}>{label}: </Text>
-      <Text>{content}</Text>
+    <Box marginTop={topGap ? 1 : 0}>
+      <Text color={color} bold={bold}>{bullet} </Text>
+      <Text color={color} dimColor={!bold}>{label} </Text>
+      <Text dimColor={bodyDim}>{body}</Text>
     </Box>
   );
 }

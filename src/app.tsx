@@ -5,13 +5,14 @@ import { Runtime } from './runtime.js';
 import { Client } from './client.js';
 import { Button, FocusActiveContext } from './components.js';
 import { extractCodeBlock, type SendEvent, type SubmitEvent, type InteractionContext } from './sandbox.js';
-import type { ApprovalRequest, ChatMessage, InteractionRecord, ServerMessage } from './types.js';
+import type { AppError, ApprovalRequest, ChatMessage, InteractionRecord, ServerMessage } from './types.js';
 import { onMouse, setMouseEnabled, isMouseEnabled } from './mouse.js';
 
 const HISTORY_LIMIT = 50;
 const MAX_RETRIES = 2;
 
 type Pane = 'chat' | 'runtime';
+type ConnectionState = 'connected' | 'reconnecting' | 'lost';
 
 interface AppProps {
   client: Client;
@@ -27,11 +28,12 @@ export function App({ client }: AppProps): React.ReactElement {
   const [status, setStatus] = useState<string | null>(null);
   const [mouseOn, setMouseOn] = useState<boolean>(isMouseEnabled());
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
-  const [notice, setNotice] = useState<{ level: 'error' | 'warning' | 'info'; text: string } | null>(null);
   // scrollOffset = how many newest messages to hide. 0 means pinned to latest.
   const [scrollOffset, setScrollOffset] = useState(0);
+  // Derived from AppError codes from the network layer. Drives the StatusLine
+  // dot for conditions that persist longer than a single chat entry.
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connected');
   const retryCount = useRef(0);
-  const noticeTimer = useRef<NodeJS.Timeout | null>(null);
 
   const respondToApproval = useCallback(
     (id: string, approved: boolean) => {
@@ -72,15 +74,37 @@ export function App({ client }: AppProps): React.ReactElement {
   useEffect(() => {
     return onMouse((e) => {
       if (e.type !== 'press') return;
-      const chatWidth = Math.floor(stdout.columns * 0.4);
+      // In narrow/stacked mode only one pane is visible; clicks don't move focus.
+      if (stdout.columns < 80) return;
+      const chatWidth = Math.min(60, Math.floor(stdout.columns * 0.4));
       setActivePane(e.x < chatWidth ? 'chat' : 'runtime');
     });
   }, [stdout.columns]);
 
-  const showNotice = useCallback((level: 'error' | 'warning' | 'info', text: string) => {
-    setNotice({ level, text });
-    if (noticeTimer.current) clearTimeout(noticeTimer.current);
-    noticeTimer.current = setTimeout(() => setNotice(null), 8000);
+  // Single canonical error sink. Writes a severity-tagged chat entry, clears
+  // the status spinner, bumps scroll (so pinned-to-latest users keep seeing
+  // the newest line), derives persistent connection state from network codes,
+  // and emits a structured stderr log that never appears in the UI.
+  const reportError = useCallback((err: AppError) => {
+    setStatus(null);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `err-${Date.now()}`,
+        sender: 'system',
+        content: err.message,
+        timestamp: Date.now(),
+        severity: err.severity,
+      },
+    ]);
+    setScrollOffset((o) => (o > 0 ? o + 1 : 0));
+
+    if (err.source === 'network') {
+      if (err.code === 'ws_disconnected') setConnectionState('reconnecting');
+      else if (err.code === 'ws_lost') setConnectionState('lost');
+    }
+
+    console.error('[shapeshiftui]', err);
   }, []);
 
   useEffect(() => {
@@ -93,60 +117,49 @@ export function App({ client }: AppProps): React.ReactElement {
           setSource(code);
           retryCount.current = 0;
         }
+        // Any inbound message proves the socket is alive — clear a transient
+        // 'reconnecting' state. Leave 'lost' alone: that's terminal and
+        // shouldn't be silently reset by a stray late-arriving frame.
+        setConnectionState((s) => (s === 'reconnecting' ? 'connected' : s));
       } else if (msg.type === 'error') {
-        setStatus(null);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `err-${Date.now()}`,
-            sender: 'system',
-            content: msg.error,
-            timestamp: Date.now(),
-          },
-        ]);
-        setScrollOffset((o) => (o > 0 ? o + 1 : 0));
-        showNotice('error', msg.error);
+        reportError(msg.error);
       } else if (msg.type === 'status') {
         setStatus(msg.text);
       } else if (msg.type === 'restore') {
-        setMessages(msg.messages);
+        setMessages([
+          ...msg.messages,
+          { id: `sys-${Date.now()}`, sender: 'system', content: `loaded "${msg.name}"`, timestamp: Date.now() },
+        ]);
         setInteractions([]);
+        setScrollOffset(0);
         retryCount.current = 0;
         const lastAi = [...msg.messages].reverse().find((m) => m.sender === 'ai');
         const code = lastAi ? extractCodeBlock(lastAi.content) : null;
         setSource(code);
-        showNotice('info', `loaded "${msg.name}"`);
       } else if (msg.type === 'approval_request') {
         setApprovals((prev) => [...prev, msg.request]);
-      } else if (msg.type === 'notice') {
-        showNotice(msg.level, msg.text);
       }
     };
     const remove = client.onMessage(handler);
     return remove;
-  }, [client, showNotice]);
+  }, [client, reportError]);
 
   // Called by Runtime when compilation fails — auto-retries with the backend.
   const onCompileError = useCallback(
-    (error: string) => {
+    (err: AppError) => {
       if (retryCount.current >= MAX_RETRIES) return;
       retryCount.current++;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err-${Date.now()}`,
-          sender: 'system',
-          content: `Compile error (retry ${retryCount.current}/${MAX_RETRIES}): ${error}`,
-          timestamp: Date.now(),
-        },
-      ]);
+      reportError({
+        ...err,
+        message: `Compile error (retry ${retryCount.current}/${MAX_RETRIES}): ${err.message}`,
+      });
       client.send({
         type: 'chat',
-        content: `Compile error: ${error}\nPlease fix the component.`,
+        content: `Compile error: ${err.message}\nPlease fix the component.`,
         interactions: [],
       });
     },
-    [client],
+    [client, reportError],
   );
 
   const pushSystem = useCallback((content: string) => {
@@ -228,26 +241,43 @@ export function App({ client }: AppProps): React.ReactElement {
 
   const pendingApproval = approvals[0] ?? null;
 
+  // Below this width, a 40/60 split crushes both panes — show only the active
+  // one full-width. Above it, cap chat so it doesn't stretch absurdly wide.
+  const NARROW_THRESHOLD = 80;
+  const MAX_CHAT_WIDTH = 60;
+  const narrow = stdout.columns < NARROW_THRESHOLD;
+  const chatWidth = narrow
+    ? stdout.columns
+    : Math.min(MAX_CHAT_WIDTH, Math.floor(stdout.columns * 0.4));
+  const showChat = !narrow || activePane === 'chat';
+  const showRuntime = !narrow || activePane === 'runtime';
+
   return (
     <Box flexDirection="column" width={stdout.columns} height={stdout.rows}>
+      <Header connectionState={connectionState} />
       <FocusActiveContext.Provider value={!pendingApproval}>
         <Box flexDirection="row" flexGrow={1}>
-          <Chat
-            messages={messages}
-            onSend={onSend}
-            focused={activePane === 'chat' && !pendingApproval}
-            scrollOffset={scrollOffset}
-          />
-          <Box flexGrow={1} flexDirection="column">
-            <Runtime
-              source={source}
-              sendEvent={sendEvent}
-              submitEvent={submitEvent}
-              context={context}
-              focused={activePane === 'runtime' && !pendingApproval}
-              onCompileError={onCompileError}
+          {showChat ? (
+            <Chat
+              messages={messages}
+              onSend={onSend}
+              focused={activePane === 'chat' && !pendingApproval}
+              scrollOffset={scrollOffset}
+              width={chatWidth}
             />
-          </Box>
+          ) : null}
+          {showRuntime ? (
+            <Box flexGrow={1} flexDirection="column">
+              <Runtime
+                source={source}
+                sendEvent={sendEvent}
+                submitEvent={submitEvent}
+                context={context}
+                focused={activePane === 'runtime' && !pendingApproval}
+                onCompileError={onCompileError}
+              />
+            </Box>
+          ) : null}
         </Box>
       </FocusActiveContext.Provider>
       {pendingApproval ? (
@@ -258,7 +288,7 @@ export function App({ client }: AppProps): React.ReactElement {
           onDeny={() => respondToApproval(pendingApproval.id, false)}
         />
       ) : null}
-      <StatusLine notice={notice} status={status} />
+      <StatusLine status={status} />
       <Box paddingX={1}>
         <Text dimColor>
           {pendingApproval
@@ -272,32 +302,62 @@ export function App({ client }: AppProps): React.ReactElement {
   );
 }
 
+interface HeaderProps {
+  connectionState: ConnectionState;
+}
+
+// Thin top bar. Anchors the app identity and hosts the persistent connection
+// dot so the bottom row can stay quiet when nothing is happening.
+function Header({ connectionState }: HeaderProps): React.ReactElement {
+  const dot =
+    connectionState === 'reconnecting' ? { color: 'yellow', label: 'reconnecting' } :
+    connectionState === 'lost' ? { color: 'red', label: 'connection lost' } :
+    null;
+
+  return (
+    <Box paddingX={1} justifyContent="space-between">
+      <Box>
+        <Text color="cyan" bold>◆ </Text>
+        <Text bold>ShapeshifTUI</Text>
+      </Box>
+      {dot ? (
+        <Box>
+          <Text color={dot.color} bold>● </Text>
+          <Text color={dot.color}>{dot.label}</Text>
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
+const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+
+// Rotating braille frame. Self-contained so the interval starts/stops with
+// the component lifecycle — stops redrawing the moment StatusLine hides it.
+function Spinner(): React.ReactElement {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFrame((n) => (n + 1) % SPINNER_FRAMES.length), 80);
+    return () => clearInterval(id);
+  }, []);
+  return <Text color="cyan">{SPINNER_FRAMES[frame]}</Text>;
+}
+
 interface StatusLineProps {
-  notice: { level: 'error' | 'warning' | 'info'; text: string } | null;
   status: string | null;
 }
 
-function StatusLine({ notice, status }: StatusLineProps): React.ReactElement {
-  if (notice) {
-    const bg = notice.level === 'error' ? 'red' : notice.level === 'warning' ? 'yellow' : 'blue';
-    const prefix = notice.level === 'error' ? 'E' : notice.level === 'warning' ? 'W' : 'I';
-    return (
-      <Box>
-        <Text backgroundColor={bg} color="white" bold>
-          {' '}{prefix}{' '}
-        </Text>
-        <Text color={bg}> {notice.text}</Text>
-      </Box>
-    );
-  }
-  if (status) {
-    return (
-      <Box paddingX={1}>
-        <Text dimColor italic>{`⋯ ${status}`}</Text>
-      </Box>
-    );
-  }
-  return <Box minHeight={1} />;
+// Transient turn activity only. Persistent connection state lives in the
+// Header, so this row is free to stay empty when nothing is happening.
+function StatusLine({ status }: StatusLineProps): React.ReactElement {
+  if (!status) return <Box minHeight={1} />;
+  return (
+    <Box paddingX={1}>
+      <Spinner />
+      <Text> </Text>
+      <Text dimColor italic>{status}</Text>
+    </Box>
+  );
 }
 
 interface ApprovalBannerProps {
