@@ -137,8 +137,15 @@ export function App({ client }: AppProps): React.ReactElement {
         setInteractions([]);
         setScrollOffset(0);
         retryCount.current = 0;
-        const lastAi = [...msg.messages].reverse().find((m) => m.sender === 'ai');
-        const code = lastAi ? extractCodeBlock(lastAi.content) : null;
+        // Scan backward for the most recent AI message that actually carries a
+        // layout — a trailing plain-text turn would otherwise blank the canvas.
+        let code: string | null = null;
+        for (let i = msg.messages.length - 1; i >= 0; i--) {
+          const m = msg.messages[i];
+          if (m?.sender !== 'ai') continue;
+          const block = extractCodeBlock(m.content);
+          if (block) { code = block; break; }
+        }
         setSource(code);
       } else if (msg.type === 'approval_request') {
         setApprovals((prev) => [...prev, msg.request]);

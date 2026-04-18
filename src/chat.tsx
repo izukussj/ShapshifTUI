@@ -53,10 +53,13 @@ export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatPro
     setSelectedIndex(0);
   }, [draft]);
 
-  const accept = () => {
+  // Tab completes toward the selection. If the draft already matches the full
+  // completion, Tab stays put (Enter fires the send).
+  const completeToSelection = () => {
     const picked = suggestions[selectedIndex] ?? suggestions[0];
     if (!picked) return;
-    setDraft(picked.args ? `${picked.name} ` : picked.name);
+    const completed = picked.args ? `${picked.name} ` : picked.name;
+    if (draft !== completed) setDraft(completed);
   };
 
   useInput((_input, key) => {
@@ -66,15 +69,28 @@ export function Chat({ messages, onSend, focused, scrollOffset, width }: ChatPro
     } else if (key.downArrow) {
       setSelectedIndex((i) => (i + 1) % suggestions.length);
     } else if (key.tab) {
-      accept();
+      completeToSelection();
     }
   }, { isActive: focused });
 
   const submit = (value: string) => {
-    // Enter while the slash menu is open completes the selection instead of
-    // sending — avoids shipping half-typed "/sa" as a literal message.
+    // Enter progresses the slash menu: complete if the draft is a prefix, or
+    // send if the draft already matches an argless command. Without this,
+    // argless commands (/views, /help) loop — Enter would just re-complete
+    // to the same string and never reach onSend.
     if (suggestions.length > 0) {
-      accept();
+      const picked = suggestions[selectedIndex] ?? suggestions[0]!;
+      const completed = picked.args ? `${picked.name} ` : picked.name;
+      if (draft !== completed) {
+        setDraft(completed);
+        return;
+      }
+      // Draft already equals the completion. If the command is argless, ship
+      // it; otherwise hold (user still needs to type the argument).
+      if (!picked.args) {
+        onSend(draft.trim());
+        setDraft('');
+      }
       return;
     }
     const trimmed = value.trim();
