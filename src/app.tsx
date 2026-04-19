@@ -55,7 +55,7 @@ export function App({ client }: AppProps): React.ReactElement {
     if (key.ctrl && _input === 'p') {
       const next = setMouseEnabled(!mouseOn);
       setMouseOn(next);
-      setStatus(next ? 'mouse on — hold Option to select text' : 'mouse off — text selection restored');
+      // State shows in the bottom hint — no status spinner for a mode toggle.
     }
 
     // Esc: cancel in priority order — help → pending approval → active turn.
@@ -71,10 +71,12 @@ export function App({ client }: AppProps): React.ReactElement {
       return;
     }
 
-    // Tab switches panes. Yields to chat when its slash menu is open (Tab
-    // accepts the suggestion there) and to approval dialogs.
-    if (key.tab && !pending && !helpOpen && !chatCapturesTab.current) {
-      setActivePane((p) => (p === 'chat' ? 'runtime' : 'chat'));
+    // Tab from chat → hop into runtime. Once inside runtime, Tab is NOT
+    // intercepted here — Ink's default focus manager cycles through the
+    // sandboxed useFocus hooks. Ctrl+A returns to chat. Yields to chat's
+    // slash menu, approvals, and help.
+    if (key.tab && !key.shift && !pending && !helpOpen && !chatCapturesTab.current && activePane === 'chat') {
+      setActivePane('runtime');
       return;
     }
 
@@ -270,16 +272,21 @@ export function App({ client }: AppProps): React.ReactElement {
   const chatWidth = narrow
     ? stdout.columns
     : Math.min(MAX_CHAT_WIDTH, Math.floor(stdout.columns * 0.4));
+  // Pin the runtime pane to the remainder so wide sandbox content can't
+  // push the chat pane around — layout shifts are the worst thing.
+  const runtimeWidth = narrow ? stdout.columns : Math.max(20, stdout.columns - chatWidth);
   const showChat = !narrow || activePane === 'chat';
   const showRuntime = !narrow || activePane === 'runtime';
 
   // Rough accounting of the app chrome outside the panes so Chat doesn't
   // over-reserve and overflow its allocation (which would scroll the header
-  // off the top of the terminal).
+  // off the top of the terminal). StatusLine always renders minHeight=1 —
+  // do NOT gate it on `status`, or the frame shifts by a row when a turn
+  // starts.
   const chromeRows =
     1 /* header */ +
+    1 /* status line (always min 1 row) */ +
     1 /* bottom hint */ +
-    (status ? 1 : 0) +
     (pendingApproval ? 6 : 0) +
     (helpOpen ? 10 : 0);
   const availableRows = Math.max(5, stdout.rows - chromeRows);
@@ -303,7 +310,7 @@ export function App({ client }: AppProps): React.ReactElement {
         ) : null}
         {showRuntime ? (
           <FocusActiveContext.Provider value={activePane === 'runtime' && !pendingApproval}>
-            <Box flexGrow={1} flexDirection="column">
+            <Box width={runtimeWidth} flexDirection="column" flexShrink={0}>
               <Runtime
                 source={source}
                 sendEvent={sendEvent}
@@ -333,8 +340,8 @@ export function App({ client }: AppProps): React.ReactElement {
             : helpOpen
               ? 'Esc: close help  ·  Ctrl+K: toggle'
               : status
-                ? 'Esc: cancel turn  ·  Ctrl+K: help  ·  Ctrl+C: quit'
-                : 'Ctrl+A/E: panes  ·  Ctrl+K: help  ·  Ctrl+C: quit'}
+                ? `Esc: cancel turn  ·  Ctrl+K: help  ·  mouse ${mouseOn ? 'on' : 'off'}  ·  Ctrl+C: quit`
+                : `Ctrl+A/E: panes  ·  Ctrl+K: help  ·  mouse ${mouseOn ? 'on' : 'off'} (Ctrl+P)  ·  Ctrl+C: quit`}
         </Text>
       </Box>
     </Box>
@@ -420,6 +427,7 @@ function CheatsheetModal({ mouseOn }: { mouseOn: boolean }): React.ReactElement 
       rows: [
         { keys: 'Ctrl+A', label: 'focus chat' },
         { keys: 'Ctrl+E', label: 'focus component' },
+        { keys: 'Tab', label: 'chat → runtime, then cycles focus inside' },
         { keys: 'PgUp / PgDn', label: 'scroll chat history' },
       ],
     },

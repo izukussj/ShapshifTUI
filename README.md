@@ -76,7 +76,7 @@ Backend-specific. Put them in `.env.local` or prefix the command.
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `SHAPESHIFTUI_MOUSE` | unset | Set to `1` to enable mouse tracking at launch (also toggleable at runtime with `Ctrl+P`) |
+| `SHAPESHIFTUI_MOUSE` | on | Mouse tracking is on by default. Set to `0` to disable at launch (also toggleable at runtime with `Ctrl+P`). Hold Option (macOS) or Shift (most terminals) to select text while mouse is on. |
 
 ## Architecture
 
@@ -149,7 +149,7 @@ Props the component receives:
 |-----|--------|
 | `Ctrl+A` | Focus chat pane |
 | `Ctrl+E` | Focus runtime pane |
-| `Tab` | Switch panes (cycles focus inside the runtime when slash menu is closed and runtime is focused) |
+| `Tab` | From chat → jump into runtime. Inside runtime, Tab cycles focus through buttons, inputs, and other focusable widgets. Use `Ctrl+A` to return to chat. |
 | `Enter` / `Space` | Activate focused button |
 | `PgUp` / `PgDn` | Scroll chat history |
 | `/` | Open slash-command menu (in chat) — `↑`/`↓` to browse, `Tab`/`Enter` to accept |

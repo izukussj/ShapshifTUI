@@ -80,6 +80,12 @@ class Session {
     // handleCancel() SIGTERM the process on user request.
     this.currentChild = null;
     this.cancelled = false;
+    // Pre-spawned `codex exec resume … -` process waiting on stdin. Consumed
+    // at the start of the next turn to skip the 500ms–1s cold-spawn cost.
+    // Null until we have a threadId and a completed turn behind us.
+    this.nextChild = null;
+    this.nextChildKey = null;
+    this.nextChildBornAt = 0;
   }
 
   summarizeAction(data) {
@@ -138,7 +144,9 @@ class Session {
       });
       return;
     }
+    const changed = resolved !== this.cwd;
     this.cwd = resolved;
+    if (changed) this.killHotSpare();
     this.log({ type: 'init', cwd: resolved });
     this.send('ai', `Working in \`${resolved}\`.`);
   }
@@ -210,6 +218,72 @@ class Session {
     return `[User triggered event: ${eventType}]\nData: ${JSON.stringify(data ?? {})}`;
   }
 
+  hotSpareKey() {
+    return `${this.cwd}|${SANDBOX}|${CODEX_MODEL}`;
+  }
+
+  spawnHotSpare() {
+    if (!this.threadId) return;
+    this.killHotSpare();
+    const args = ['exec', 'resume', this.threadId, '--json', '--skip-git-repo-check', ...MODEL_ARGS, '-'];
+    let child;
+    try {
+      child = spawn(CODEX_BIN, args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: process.platform === 'win32',
+      });
+    } catch (err) {
+      this.log({ type: 'hot-spare-spawn-failed', err: err.message });
+      return;
+    }
+
+    // Drain both pipes into local buffers so the OS pipe doesn't fill while
+    // the hot-spare is idle. These buffers are handed off on promotion.
+    let earlyStdout = '';
+    let earlyStderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    const drainStdout = (chunk) => { earlyStdout += chunk; };
+    const drainStderr = (chunk) => { earlyStderr += chunk; };
+    child.stdout.on('data', drainStdout);
+    child.stderr.on('data', drainStderr);
+    child.__drainStdout = drainStdout;
+    child.__drainStderr = drainStderr;
+    child.__getEarlyStdout = () => earlyStdout;
+    child.__getEarlyStderr = () => earlyStderr;
+
+    child.on('error', (err) => {
+      this.log({ type: 'hot-spare-error', err: err.message });
+      if (this.nextChild === child) {
+        this.nextChild = null;
+        this.nextChildKey = null;
+        this.nextChildBornAt = 0;
+      }
+    });
+    child.on('exit', (code, signal) => {
+      if (this.nextChild === child) {
+        this.log({ type: 'hot-spare-exit', code, signal });
+        this.nextChild = null;
+        this.nextChildKey = null;
+        this.nextChildBornAt = 0;
+      }
+    });
+
+    this.nextChild = child;
+    this.nextChildKey = this.hotSpareKey();
+    this.nextChildBornAt = Date.now();
+    this.log({ type: 'hot-spare-spawned', key: this.nextChildKey });
+  }
+
+  killHotSpare() {
+    if (!this.nextChild) return;
+    const child = this.nextChild;
+    this.nextChild = null;
+    this.nextChildKey = null;
+    this.nextChildBornAt = 0;
+    try { child.kill('SIGTERM'); } catch { /* already dead */ }
+  }
+
   async runTurn(prompt) {
     if (this.busy) {
       this.sendStatus('still working on the previous turn — hold on');
@@ -227,32 +301,64 @@ class Session {
     const finalPrompt = needsPreamble
       ? `${CANONICAL_INSTRUCTIONS}\n\n---\n\nUser: ${prompt}`
       : prompt;
-    const args = resume
-      ? ['exec', 'resume', this.threadId, '--json', '--skip-git-repo-check', ...MODEL_ARGS, finalPrompt]
-      : ['exec', '--json', '--skip-git-repo-check', '-s', SANDBOX, '-C', this.cwd, ...MODEL_ARGS, finalPrompt];
-
-    this.log({ type: 'codex-spawn', resume, threadId: this.threadId, cwd: this.cwd, preamble: needsPreamble, promptPreview: prompt.slice(0, 200) });
 
     let stderrBuf = '';
     let stdoutBuf = '';
     let anyOutput = false;
+    let toolCount = 0;
+    let child = null;
+    let usedHotSpare = false;
 
     const status = (text) => this.sendStatus(text);
 
-    status('thinking…');
+    // Try to consume the hot-spare if key matches and process is still alive.
+    const key = this.hotSpareKey();
+    if (resume && this.nextChild && this.nextChildKey === key && !this.nextChild.killed && this.nextChild.exitCode === null) {
+      const candidate = this.nextChild;
+      const age = Date.now() - this.nextChildBornAt;
+      this.nextChild = null;
+      this.nextChildKey = null;
+      this.nextChildBornAt = 0;
 
-    // shell:true on Windows so `.cmd`/`.bat` shims (how codex usually installs
-    // via npm on Windows) resolve. No-op on POSIX.
-    const child = spawn(CODEX_BIN, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
-    });
+      stdoutBuf += candidate.__getEarlyStdout();
+      stderrBuf += candidate.__getEarlyStderr();
+      candidate.stdout.off('data', candidate.__drainStdout);
+      candidate.stderr.off('data', candidate.__drainStderr);
+
+      try {
+        candidate.stdin.write(finalPrompt);
+        candidate.stdin.end();
+        child = candidate;
+        usedHotSpare = true;
+        this.log({ type: 'hot-spare-hit', ageMs: age, promptPreview: prompt.slice(0, 200) });
+      } catch (err) {
+        this.log({ type: 'hot-spare-stdin-failed', err: err.message });
+        try { candidate.kill('SIGTERM'); } catch { /* already dead */ }
+        stdoutBuf = '';
+        stderrBuf = '';
+      }
+    }
+
+    if (!child) {
+      const args = resume
+        ? ['exec', 'resume', this.threadId, '--json', '--skip-git-repo-check', ...MODEL_ARGS, finalPrompt]
+        : ['exec', '--json', '--skip-git-repo-check', '-s', SANDBOX, '-C', this.cwd, ...MODEL_ARGS, finalPrompt];
+      this.log({ type: 'codex-spawn', resume, threadId: this.threadId, cwd: this.cwd, preamble: needsPreamble, promptPreview: prompt.slice(0, 200), hotSpare: false });
+      // shell:true on Windows so `.cmd`/`.bat` shims (how codex usually installs
+      // via npm on Windows) resolve. No-op on POSIX.
+      child = spawn(CODEX_BIN, args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: process.platform === 'win32',
+      });
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+    }
+
     this.currentChild = child;
     this.cancelled = false;
+    status('thinking…');
 
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk) => {
-      stdoutBuf += chunk;
+    const processLines = () => {
       let nl;
       while ((nl = stdoutBuf.indexOf('\n')) !== -1) {
         const line = stdoutBuf.slice(0, nl).trim();
@@ -267,10 +373,31 @@ class Session {
             continue;
           }
 
-          if (evt.type === 'item.started' && evt.item?.type === 'command_execution') {
-            const raw = String(evt.item.command || '').replace(/\s+/g, ' ');
-            const cmd = raw.length > 120 ? raw.slice(0, 117) + '…' : raw;
-            status(`working — ${cmd}`);
+          if (evt.type === 'item.started' && evt.item) {
+            const it = evt.item;
+            let label;
+            if (it.type === 'command_execution') {
+              const raw = String(it.command || '').replace(/\s+/g, ' ');
+              label = raw.length > 100 ? raw.slice(0, 97) + '…' : raw;
+            } else if (it.type === 'mcp_tool_call' || String(it.type || '').startsWith('mcp')) {
+              // Codex MCP event shape not pinned in our captured logs; try
+              // common field names, fall back to the type string.
+              const name = it.tool_name || it.name || it.server || it.type;
+              label = `mcp ${name}`;
+            } else if (it.type === 'agent_message') {
+              continue; // not a tool; don't advance counter
+            } else {
+              label = it.type; // generic fallback beats silence
+            }
+            toolCount++;
+            status(`working — #${toolCount}: ${label}`);
+            continue;
+          }
+
+          if (evt.type === 'item.completed' && evt.item?.type === 'command_execution') {
+            const outLen = (evt.item.aggregated_output || '').length;
+            const ec = evt.item.exit_code;
+            status(`#${toolCount} done (exit ${ec}, ${outLen}b) — thinking…`);
             continue;
           }
 
@@ -282,6 +409,8 @@ class Session {
 
           if (evt.type === 'turn.completed') {
             status(null);
+            // Eat the cold-spawn cost for the next turn while the user reads.
+            if (!this.cancelled && this.threadId) this.spawnHotSpare();
             continue;
           }
 
@@ -295,16 +424,27 @@ class Session {
               message: `turn failed: ${detail}`,
               details: evt.error ?? null,
             });
+            // Don't pre-spawn when codex is in a bad state; defer to the next
+            // runTurn's cold path.
+            this.killHotSpare();
             continue;
           }
         } catch (err) {
           logSilent('codex_stdout_parse_failed', 'codex emitted a non-JSON line; dropped', err);
         }
       }
+    };
+
+    child.stdout.on('data', (chunk) => {
+      stdoutBuf += chunk;
+      processLines();
     });
 
-    child.stderr.setEncoding('utf8');
     child.stderr.on('data', (c) => { stderrBuf += c; });
+
+    // If we inherited buffered stdout from the hot-spare, parse it now rather
+    // than waiting for the next chunk.
+    if (usedHotSpare && stdoutBuf) processLines();
 
     child.on('close', (code) => {
       this.busy = false;
@@ -323,6 +463,7 @@ class Session {
           message: `codex exited with code ${code}${stderrBuf ? `: ${stderrBuf.trim().slice(-500)}` : ''}`,
           details: { exitCode: code, stderrTail: stderrBuf.trim().slice(-2000) },
         });
+        this.killHotSpare();
         return;
       }
       if (!anyOutput) {
@@ -333,6 +474,7 @@ class Session {
           recoverable: true,
           message: 'codex finished without producing a message',
         });
+        this.killHotSpare();
       }
     });
 
@@ -347,6 +489,7 @@ class Session {
         message: `Failed to launch codex (${CODEX_BIN}): ${err.message}`,
         details: { bin: CODEX_BIN, err: err.message },
       });
+      this.killHotSpare();
     });
   }
 
@@ -561,6 +704,11 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('client disconnected');
     session.log({ type: 'disconnect' });
+    // Suppress the 'turn cancelled' message on child close — there's no
+    // client left to receive it.
+    session.cancelled = true;
+    try { session.currentChild?.kill('SIGTERM'); } catch { /* already dead */ }
+    session.killHotSpare();
   });
 });
 

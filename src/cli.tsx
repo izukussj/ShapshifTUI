@@ -163,7 +163,8 @@ async function main() {
   if (cwd) client.send({ type: 'init', cwd });
 
   enterAltScreen();
-  if (process.env.SHAPESHIFTUI_MOUSE === '1') setMouseEnabled(true);
+  // Mouse on by default — set SHAPESHIFTUI_MOUSE=0 to disable at launch.
+  if (process.env.SHAPESHIFTUI_MOUSE !== '0') setMouseEnabled(true);
 
   const cleanup = () => {
     exitAltScreen();
