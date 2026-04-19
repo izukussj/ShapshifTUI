@@ -34,3 +34,9 @@ coverage/
 *.tmp
 *.temp
 .env*
+
+# Local planning scratchpads (not part of the shipped package)
+PLAN.md
+first_spec.md
+debug.log
+2026-*.txt

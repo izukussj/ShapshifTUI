@@ -3,9 +3,42 @@
   "version": "2.0.0",
   "description": "Chat-driven TUI where the AI ships React/Ink components that run in a sandbox",
   "type": "module",
-  "bin": {
-    "shapeshiftui": "dist/cli.js"
+  "license": "MIT",
+  "author": "Seydina Diop <seydina.laye85@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/izukussj/MoltUI.git"
   },
+  "homepage": "https://github.com/izukussj/MoltUI#readme",
+  "bugs": {
+    "url": "https://github.com/izukussj/MoltUI/issues"
+  },
+  "keywords": [
+    "tui",
+    "terminal",
+    "ink",
+    "react",
+    "ai",
+    "openai",
+    "codex",
+    "llm",
+    "sandbox",
+    "cli"
+  ],
+  "bin": {
+    "shapeshiftui": "dist/cli.js",
+    "shapeshiftui-codex-bridge": "server/codex-bridge.js",
+    "shapeshiftui-bridge": "server/bridge.js"
+  },
+  "files": [
+    "dist",
+    "server/bridge.js",
+    "server/codex-bridge.js",
+    "server/codex/AGENTS.md",
+    "mock-server/server.js",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -15,7 +48,8 @@
     "codex-bridge": "node server/codex-bridge.js",
     "demo": "node dist/cli.js ws://localhost:8080",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
     "node": ">=20.0.0"
