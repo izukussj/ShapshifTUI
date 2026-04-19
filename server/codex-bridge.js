@@ -241,7 +241,12 @@ class Session {
 
     status('thinking…');
 
-    const child = spawn(CODEX_BIN, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    // shell:true on Windows so `.cmd`/`.bat` shims (how codex usually installs
+    // via npm on Windows) resolve. No-op on POSIX.
+    const child = spawn(CODEX_BIN, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: process.platform === 'win32',
+    });
     this.currentChild = child;
     this.cancelled = false;
 
