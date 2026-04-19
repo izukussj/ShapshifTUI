@@ -28,39 +28,23 @@ You describe what you want. The AI writes a JSX component. It renders in your te
 ## Requirements
 
 - Node.js ≥ 20
-- One of: an authenticated Codex CLI install (recommended), an OpenAI API key, or the bundled mock backend
+- Either an authenticated [Codex CLI](https://developers.openai.com/codex) install (recommended) or an OpenAI API key
 
 ## Quick start
 
-Two backends ship in-tree — pick one:
-
-**Codex CLI** (recommended — agentic, can run tools and MCP servers):
+One command — the TUI spawns the bridge for you.
 
 ```bash
-npm install
-brew install codex && codex login   # or: npm i -g @openai/codex
+# 1. Install & authenticate Codex once
+brew install codex && codex login   # or: npm i -g @openai/codex && codex login
 
-# Terminal 1 — Codex bridge (uses server/codex/AGENTS.md)
-npm run codex-bridge
-
-# Terminal 2 — build and launch the TUI
-npm run build && npm start
+# 2. Launch
+npx shapeshiftui                    # or: npm i -g shapeshiftui && shapeshiftui
 ```
 
-**Plain OpenAI** (simpler, chat-completions only):
+First run detects `codex` on `PATH` and auto-spawns `server/codex-bridge.js` on `:8080`. No Codex? Set `OPENAI_API_KEY` (in your env or `.env.local`) and the CLI falls back to the plain OpenAI bridge. To point at a bridge you're running yourself, pass the WebSocket URL — e.g. `shapeshiftui ws://localhost:9000` (auto-spawn is skipped when a URL is given, or with `--no-serve`).
 
-```bash
-npm install
-echo "OPENAI_API_KEY=sk-..." > .env.local
-
-# Terminal 1 — OpenAI bridge
-npm run bridge
-
-# Terminal 2 — build and launch the TUI
-npm run build && npm start
-```
-
-Then type something like `make a counter` or `build a login form` and watch it render.
+Then type something like `make a counter` or `show me my processes` and watch it render.
 
 ## Scripts
 
@@ -68,11 +52,9 @@ Then type something like `make a counter` or `build a login form` and watch it r
 |---------|--------------|
 | `npm run build` | Bundle the TUI to `dist/` via tsup |
 | `npm run dev` | Build in watch mode |
-| `npm start` | Launch the TUI (requires a running backend) |
-| `npm run codex-bridge` | Start the Codex CLI bridge (see [Codex backend](#codex-backend) below) |
-| `npm run bridge` | Start the OpenAI bridge on `ws://localhost:8080` |
-| `npm run mock` | Start a mock backend that serves canned components (no API key needed) |
-| `npm run demo` | Shortcut for `npm start` pointing at localhost:8080 |
+| `npm start` | Launch the TUI (auto-spawns the Codex bridge when none is reachable) |
+| `npm run codex-bridge` | Start the Codex CLI bridge manually (see [Codex backend](#codex-backend) below) |
+| `npm run bridge` | Start the OpenAI bridge manually on `ws://localhost:8080` |
 | `npm run typecheck` | TypeScript check without emit |
 | `npm test` | Run the vitest suite |
 
@@ -125,9 +107,6 @@ server/
   bridge.js          OpenAI chat-completions bridge
   codex-bridge.js    Codex CLI bridge (spawns `codex exec --json`)
   codex/AGENTS.md    system prompt / contract consumed by the Codex bridge
-
-mock-server/
-  server.js          canned responses for offline development
 
 scripts/
   smoke-codex.mjs    end-to-end sanity check against a running bridge

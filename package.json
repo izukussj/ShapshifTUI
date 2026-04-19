@@ -35,7 +35,6 @@
     "server/bridge.js",
     "server/codex-bridge.js",
     "server/codex/AGENTS.md",
-    "mock-server/server.js",
     "README.md",
     "LICENSE"
   ],
@@ -43,10 +42,8 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "start": "node dist/cli.js",
-    "mock": "node mock-server/server.js",
     "bridge": "node server/bridge.js",
     "codex-bridge": "node server/codex-bridge.js",
-    "demo": "node dist/cli.js ws://localhost:8080",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "prepublishOnly": "npm run build && npm test"
