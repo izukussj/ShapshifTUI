@@ -51,7 +51,7 @@ Your component is a single arrow function expression (NOT a default export, NOT 
 ### Globals available (DO NOT destructure from props — they are in scope as bare identifiers)
 - React, useState, useEffect, useRef, useMemo, useCallback, useReducer
 - Box, Text, Newline, Spacer, Static, Transform (from Ink)
-- useFocus, useFocusManager, useInput (from Ink)
+- useFocus, useFocusManager, useInput, useStdout (from Ink)
 - TextInput (from ink-text-input)
 - Button — custom component: \`<Button label="Click me" onPress={() => ...} />\`
 
@@ -65,6 +65,8 @@ Your component is a single arrow function expression (NOT a default export, NOT 
 7. Keep components self-contained — all state lives inside the component.
 8. Do NOT import anything. Do NOT use export. Just the arrow function.
 9. You can include explanatory text before/after the code block.
+10. Every button, row, or form that calls \`submitEvent(...)\` must update local state first and render compact feedback inside the component, such as "Refresh sent..." or "Action sent...". Reserve a stable feedback line from the first render, for example \`<Box minHeight={1}><Text>{notice || ' '}</Text></Box>\`, so showing feedback does not add/remove rows or shift the layout. Do not rely on the outer app's thinking indicator as the only user feedback.
+11. Use \`useStdout()\` for responsive layouts. Derive a compact mode from terminal width, reduce columns on narrow panes, truncate long values before rendering, keep action/notice/footer areas fixed-width or pre-reserved, and avoid changing button labels in a way that resizes rows.
 
 ### Example
 User: "make a todo list"

@@ -44,6 +44,10 @@ export function App({ client }: AppProps): React.ReactElement {
   const [mcpServers, setMcpServers] = useState<McpServer[] | null>(null);
   const [mcpLoading, setMcpLoading] = useState(false);
   const [mcpLastOp, setMcpLastOp] = useState<McpOpResult | null>(null);
+  // Some terminals update process.stdout.columns/rows on SIGWINCH but Ink may
+  // not repaint until the next input event. This no-op state bump makes resize
+  // responsiveness immediate for the shell and generated runtime components.
+  const [, forceResizeRender] = useState(0);
   const retryCount = useRef(0);
   // Chat toggles this when its slash-suggestion menu is open so the app-level
   // Tab handler yields to the chat's Tab-accept behavior.
@@ -106,6 +110,16 @@ export function App({ client }: AppProps): React.ReactElement {
       setActivePane(e.x < chatWidth ? 'chat' : 'runtime');
     });
   }, [stdout.columns]);
+
+  useEffect(() => {
+    const out = process.stdout;
+    if (!out.isTTY) return;
+    const onResize = () => forceResizeRender((n) => n + 1);
+    out.on('resize', onResize);
+    return () => {
+      out.off('resize', onResize);
+    };
+  }, []);
 
   // Single canonical error sink. Writes a severity-tagged chat entry, clears
   // the status spinner, bumps scroll (so pinned-to-latest users keep seeing

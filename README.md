@@ -147,8 +147,10 @@ The AI is instructed to return a single arrow function:
 Available in sandbox scope (no imports needed):
 
 - **React**: `React`, `useState`, `useEffect`, `useRef`, `useMemo`, `useCallback`, `useReducer`
-- **Ink**: `Box`, `Text`, `Newline`, `Spacer`, `Static`, `Transform`, `useFocus`, `useFocusManager`, `useInput`
+- **Ink**: `Box`, `Text`, `Newline`, `Spacer`, `Static`, `Transform`, `useFocus`, `useFocusManager`, `useInput`, `useStdout`
 - **Widgets**: `TextInput`, `Button`, `Checkbox`, `Select`, `Table`, `Progress`
+
+Generated components can use `useStdout()` to adapt to terminal width. Prefer compact column sets, pre-reserved feedback rows, fixed-width action areas, and truncated long values so interactions do not shift the layout.
 
 Props the component receives:
 

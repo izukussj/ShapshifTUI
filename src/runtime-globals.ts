@@ -29,6 +29,7 @@ export const runtimeGlobals = {
   useFocus: Ink.useFocus,
   useFocusManager: Ink.useFocusManager,
   useInput: Ink.useInput,
+  useStdout: Ink.useStdout,
   // input + custom widgets
   TextInput,
   Button,
