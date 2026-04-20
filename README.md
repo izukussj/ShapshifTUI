@@ -107,6 +107,7 @@ src/
   cli.tsx            entry point — opens WebSocket, mounts the Ink app
   app.tsx            root component — chat pane + runtime pane, keybindings
   chat.tsx           message history, slash-command menu, input
+  mcp.tsx            native Codex MCP manager panel
   runtime.tsx        mounts the compiled sandbox component
   sandbox.ts         esbuild transpile + vm.runInContext
   runtime-globals.ts globals exposed to sandboxed components
@@ -211,14 +212,43 @@ Every data view has a **Refresh** button that re-runs the underlying tools.
 
 ### MCP servers (recommended)
 
-The real power comes from Codex's MCP ecosystem. Add entries to `~/.codex/config.toml`:
+The real power comes from Codex's MCP ecosystem. Open the native manager from chat:
+
+```text
+/mcp list
+/mcp add context7
+/mcp remove context7
+```
+
+The panel lists configured servers, opens a native add form, and confirms removals before calling Codex's own `codex mcp` subcommands. ShapeshifTUI does not edit `~/.codex/config.toml` directly; Codex owns the file and schema.
+
+Equivalent CLI examples:
+
+```bash
+codex mcp list --json
+codex mcp add context7 -- npx -y @upstash/context7-mcp
+codex mcp add docs --url https://example.com/mcp --bearer-token-env-var DOCS_TOKEN
+codex mcp remove context7
+```
+
+Useful servers include:
 
 - **Gmail MCP** — inbox, compose, archive
 - **GitHub MCP** — PR review, issue browsing
 - **Filesystem MCP** — safe file operations outside the workspace
 - **Postgres / SQLite MCP** — query UIs
 
-Once configured, Codex picks them up automatically — no changes to ShapeshifTUI needed.
+After an add/remove, the bridge drops its pre-spawned Codex process so the next turn sees fresh MCP config.
+
+### Codex plugins
+
+For Codex plugins, ShapeshifTUI deliberately does not install or configure them directly. Use:
+
+```text
+/plugin
+```
+
+That opens a native guide telling the user to configure plugins inside Codex itself, then return to ShapeshifTUI. Plugin flows can involve auth, browser handoffs, or interactive marketplace steps, so they belong in Codex unless Codex exposes stable non-interactive plugin CRUD commands.
 
 ## Roadmap
 

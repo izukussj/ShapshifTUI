@@ -5,7 +5,9 @@ import { Runtime } from './runtime.js';
 import { Client } from './client.js';
 import { Button, FocusActiveContext } from './components.js';
 import { extractCodeBlock, type SendEvent, type SubmitEvent, type InteractionContext } from './sandbox.js';
-import type { AppError, ApprovalRequest, ChatMessage, InteractionRecord, ServerMessage } from './types.js';
+import { McpPanel, type McpPanelMode } from './mcp.js';
+import { PluginGuidePanel } from './plugin-guide.js';
+import type { AppError, ApprovalRequest, ChatMessage, InteractionRecord, McpAddPayload, McpOpResult, McpServer, ServerMessage } from './types.js';
 import { onMouse, setMouseEnabled, isMouseEnabled } from './mouse.js';
 
 const HISTORY_LIMIT = 50;
@@ -13,6 +15,8 @@ const MAX_RETRIES = 2;
 
 type Pane = 'chat' | 'runtime';
 type ConnectionState = 'connected' | 'reconnecting' | 'lost';
+type McpAdminView = { mode: McpPanelMode; name?: string };
+type AdminView = McpAdminView | { mode: 'plugin' };
 
 interface AppProps {
   client: Client;
@@ -34,6 +38,12 @@ export function App({ client }: AppProps): React.ReactElement {
   // dot for conditions that persist longer than a single chat entry.
   const [connectionState, setConnectionState] = useState<ConnectionState>('connected');
   const [helpOpen, setHelpOpen] = useState(false);
+  // Native admin overlay that takes over the runtime pane (replaces sandbox
+  // source while open). Cleared via the panel's Close button.
+  const [adminView, setAdminView] = useState<AdminView | null>(null);
+  const [mcpServers, setMcpServers] = useState<McpServer[] | null>(null);
+  const [mcpLoading, setMcpLoading] = useState(false);
+  const [mcpLastOp, setMcpLastOp] = useState<McpOpResult | null>(null);
   const retryCount = useRef(0);
   // Chat toggles this when its slash-suggestion menu is open so the app-level
   // Tab handler yields to the chat's Tab-accept behavior.
@@ -138,6 +148,7 @@ export function App({ client }: AppProps): React.ReactElement {
         // shouldn't be silently reset by a stray late-arriving frame.
         setConnectionState((s) => (s === 'reconnecting' ? 'connected' : s));
       } else if (msg.type === 'error') {
+        if (msg.error.code.startsWith('mcp_')) setMcpLoading(false);
         reportError(msg.error);
       } else if (msg.type === 'status') {
         setStatus(msg.text);
@@ -161,6 +172,17 @@ export function App({ client }: AppProps): React.ReactElement {
         setSource(code);
       } else if (msg.type === 'approval_request') {
         setApprovals((prev) => [...prev, msg.request]);
+      } else if (msg.type === 'mcp_list_result') {
+        setMcpServers(msg.servers);
+        setMcpLoading(false);
+      } else if (msg.type === 'mcp_op_result') {
+        setMcpLastOp(msg.result);
+        setMcpLoading(false);
+        // Any mutation invalidates the list we're showing — refetch.
+        if (msg.result.ok) {
+          setMcpLoading(true);
+          client.send({ type: 'mcp-list' });
+        }
       }
     };
     const remove = client.onMessage(handler);
@@ -192,6 +214,18 @@ export function App({ client }: AppProps): React.ReactElement {
     ]);
   }, []);
 
+  const openMcp = useCallback((mode: McpPanelMode, name?: string) => {
+    setAdminView({ mode, name });
+    setActivePane('runtime');
+    setMcpLastOp(null);
+    if (mode === 'list') {
+      setMcpLoading(true);
+      client.send({ type: 'mcp-list' });
+    } else {
+      setMcpLoading(false);
+    }
+  }, [client]);
+
   const onSend = useCallback(
     (content: string) => {
       const trimmed = content.trim();
@@ -217,12 +251,39 @@ export function App({ client }: AppProps): React.ReactElement {
           client.send({ type: 'delete-view', name: arg });
           return;
         }
+        if (cmd === '/mcp') {
+          const [subcommand = 'list', ...subArgs] = arg.split(/\s+/).filter(Boolean);
+          const name = subArgs.join(' ').trim();
+          if (subcommand === 'list') {
+            openMcp('list');
+            return pushSystem('opened MCP server list');
+          }
+          if (subcommand === 'add') {
+            openMcp('add', name);
+            return pushSystem(name ? `opened MCP add form for "${name}"` : 'opened MCP add form');
+          }
+          if (subcommand === 'remove' || subcommand === 'rm') {
+            if (!name) return pushSystem('usage: /mcp remove <name>');
+            openMcp('remove', name);
+            return pushSystem(`confirm MCP removal for "${name}"`);
+          }
+          return pushSystem('usage: /mcp list | /mcp add <name> | /mcp remove <name>');
+        }
+        if (cmd === '/plugin' || cmd === '/plugins') {
+          setAdminView({ mode: 'plugin' });
+          setActivePane('runtime');
+          return pushSystem('opened plugin setup guide');
+        }
         if (cmd === '/help') {
           return pushSystem(
             'commands:\n' +
               '  /save <name>    save the current view\n' +
               '  /load <name>    restore a saved view\n' +
               '  /views          list saved views\n' +
+              '  /mcp list       list Codex MCP servers\n' +
+              '  /mcp add <name> open native add form\n' +
+              '  /mcp remove <name> confirm removal\n' +
+              '  /plugin         show Codex plugin setup guide\n' +
               '  /delete <name>  remove a saved view\n' +
               'tip: start typing "/" — Tab completes.',
           );
@@ -241,8 +302,29 @@ export function App({ client }: AppProps): React.ReactElement {
       setStatus(null);
       client.send({ type: 'chat', content, interactions });
     },
-    [client, interactions, pushSystem],
+    [client, interactions, openMcp, pushSystem],
   );
+
+  const refreshMcp = useCallback(() => {
+    setMcpLoading(true);
+    client.send({ type: 'mcp-list' });
+  }, [client]);
+
+  const addMcp = useCallback((payload: McpAddPayload) => {
+    setMcpLastOp(null);
+    setMcpLoading(true);
+    client.send({ type: 'mcp-add', payload });
+  }, [client]);
+
+  const removeMcp = useCallback((name: string) => {
+    setMcpLastOp(null);
+    setMcpLoading(true);
+    client.send({ type: 'mcp-remove', name });
+  }, [client]);
+
+  const closeAdminView = useCallback(() => {
+    setAdminView(null);
+  }, []);
 
   const recordEvent = useCallback((eventType: string, data: unknown) => {
     setInteractions((prev) => {
@@ -311,14 +393,35 @@ export function App({ client }: AppProps): React.ReactElement {
         {showRuntime ? (
           <FocusActiveContext.Provider value={activePane === 'runtime' && !pendingApproval}>
             <Box width={runtimeWidth} flexDirection="column" flexShrink={0}>
-              <Runtime
-                source={source}
-                sendEvent={sendEvent}
-                submitEvent={submitEvent}
-                context={context}
-                focused={activePane === 'runtime' && !pendingApproval}
-                onCompileError={onCompileError}
-              />
+              {adminView?.mode === 'plugin' ? (
+                <PluginGuidePanel
+                  focused={activePane === 'runtime' && !pendingApproval}
+                  onClose={closeAdminView}
+                />
+              ) : adminView ? (
+                <McpPanel
+                  key={`${adminView.mode}:${adminView.name ?? ''}`}
+                  servers={mcpServers}
+                  lastOp={mcpLastOp}
+                  loading={mcpLoading}
+                  initialMode={adminView.mode}
+                  initialName={adminView.name}
+                  onRefresh={refreshMcp}
+                  onAdd={addMcp}
+                  onRemove={removeMcp}
+                  onClose={closeAdminView}
+                  focused={activePane === 'runtime' && !pendingApproval}
+                />
+              ) : (
+                <Runtime
+                  source={source}
+                  sendEvent={sendEvent}
+                  submitEvent={submitEvent}
+                  context={context}
+                  focused={activePane === 'runtime' && !pendingApproval}
+                  onCompileError={onCompileError}
+                />
+              )}
             </Box>
           </FocusActiveContext.Provider>
         ) : null}

@@ -143,6 +143,16 @@ class Session {
     this.log({ type: 'error', error });
   }
 
+  handleUnsupportedMcpAdmin() {
+    this.emitError({
+      source: 'bridge',
+      code: 'mcp_unsupported',
+      severity: 'warn',
+      recoverable: true,
+      message: 'MCP manager requires the Codex bridge. Start with Codex CLI available, or run npm run codex-bridge.',
+    });
+  }
+
   async handleChat(content, clientInteractions) {
     // Merge incoming interactions into session history.
     if (clientInteractions?.length) {
@@ -256,6 +266,8 @@ wss.on('connection', (ws) => {
       session.handleChat(msg.content, msg.interactions);
     } else if (msg.type === 'event') {
       session.handleEvent(msg.eventType, msg.data);
+    } else if (msg.type === 'mcp-list' || msg.type === 'mcp-add' || msg.type === 'mcp-remove') {
+      session.handleUnsupportedMcpAdmin();
     }
   });
 

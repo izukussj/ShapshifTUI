@@ -613,6 +613,127 @@ class Session {
     this.send('ai', `Saved views for \`${this.cwd}\`:\n\n\`\`\`shapeshiftui\n${jsx}\n\`\`\``);
   }
 
+  runCodex(args, { stdinChunk } = {}) {
+    return new Promise((resolve) => {
+      let child;
+      try {
+        child = spawn(CODEX_BIN, args, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: process.platform === 'win32',
+        });
+      } catch (err) {
+        resolve({ code: -1, stdout: '', stderr: err.message });
+        return;
+      }
+      let stdout = '';
+      let stderr = '';
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
+      child.stdout.on('data', (c) => { stdout += c; });
+      child.stderr.on('data', (c) => { stderr += c; });
+      child.on('error', (err) => resolve({ code: -1, stdout, stderr: stderr || err.message }));
+      child.on('close', (code) => resolve({ code, stdout, stderr }));
+      if (stdinChunk !== undefined) {
+        try { child.stdin.end(stdinChunk); } catch { /* child already gone */ }
+      } else {
+        try { child.stdin.end(); } catch { /* child already gone */ }
+      }
+    });
+  }
+
+  async handleMcpList() {
+    const { code, stdout, stderr } = await this.runCodex(['mcp', 'list', '--json']);
+    this.log({ type: 'mcp-list', code, stderrTail: stderr.slice(-400) });
+    if (code !== 0) {
+      this.emitError({
+        source: 'codex',
+        code: 'mcp_list_failed',
+        severity: 'error',
+        recoverable: true,
+        message: `codex mcp list failed (exit ${code}): ${stderr.trim().slice(-300) || '(no stderr)'}`,
+      });
+      return;
+    }
+    let servers;
+    try {
+      servers = JSON.parse(stdout);
+    } catch (err) {
+      this.emitError({
+        source: 'bridge',
+        code: 'mcp_list_parse',
+        severity: 'error',
+        recoverable: true,
+        message: `could not parse codex mcp list output: ${err.message}`,
+        details: { stdoutTail: stdout.slice(-400) },
+      });
+      return;
+    }
+    if (!Array.isArray(servers)) servers = [];
+    this.ws.send(JSON.stringify({ type: 'mcp_list_result', servers }));
+  }
+
+  async handleMcpAdd(payload) {
+    if (!payload || typeof payload !== 'object' || typeof payload.name !== 'string' || !payload.name.trim()) {
+      this.emitError({
+        source: 'user', code: 'mcp_add_bad_args', severity: 'info', recoverable: true,
+        message: 'mcp add: missing name',
+      });
+      return;
+    }
+    const name = payload.name.trim();
+    const args = ['mcp', 'add'];
+
+    if (payload.transport === 'http') {
+      if (!payload.url || typeof payload.url !== 'string') {
+        this.emitError({ source: 'user', code: 'mcp_add_bad_args', severity: 'info', recoverable: true, message: 'mcp add: http transport requires url' });
+        return;
+      }
+      args.push(name, '--url', payload.url);
+      if (payload.bearerTokenEnvVar) args.push('--bearer-token-env-var', payload.bearerTokenEnvVar);
+    } else {
+      // stdio (default)
+      if (!payload.command || typeof payload.command !== 'string') {
+        this.emitError({ source: 'user', code: 'mcp_add_bad_args', severity: 'info', recoverable: true, message: 'mcp add: stdio transport requires command' });
+        return;
+      }
+      if (payload.env && typeof payload.env === 'object') {
+        for (const [k, v] of Object.entries(payload.env)) {
+          if (typeof v === 'string' && k) args.push('--env', `${k}=${v}`);
+        }
+      }
+      args.push(name, '--', payload.command, ...(Array.isArray(payload.args) ? payload.args : []));
+    }
+
+    const { code, stderr } = await this.runCodex(args);
+    const ok = code === 0;
+    this.log({ type: 'mcp-add', name, transport: payload.transport, code, stderrTail: stderr.slice(-400) });
+    const message = ok ? null : `codex mcp add failed (exit ${code}): ${stderr.trim().slice(-300) || '(no stderr)'}`;
+    this.ws.send(JSON.stringify({
+      type: 'mcp_op_result',
+      result: { op: 'add', name, ok, message: message ?? undefined },
+    }));
+    if (ok) this.killHotSpare(); // new config — next turn must cold-spawn to pick it up
+  }
+
+  async handleMcpRemove(name) {
+    if (typeof name !== 'string' || !name.trim()) {
+      this.emitError({
+        source: 'user', code: 'mcp_remove_bad_args', severity: 'info', recoverable: true,
+        message: 'mcp remove: missing name',
+      });
+      return;
+    }
+    const { code, stderr } = await this.runCodex(['mcp', 'remove', name.trim()]);
+    const ok = code === 0;
+    this.log({ type: 'mcp-remove', name, code, stderrTail: stderr.slice(-400) });
+    const message = ok ? null : `codex mcp remove failed (exit ${code}): ${stderr.trim().slice(-300) || '(no stderr)'}`;
+    this.ws.send(JSON.stringify({
+      type: 'mcp_op_result',
+      result: { op: 'remove', name, ok, message: message ?? undefined },
+    }));
+    if (ok) this.killHotSpare();
+  }
+
   handleDeleteView(name) {
     const file = viewFile(this.cwd, name);
     if (!fs.existsSync(file)) {
@@ -698,6 +819,12 @@ wss.on('connection', (ws) => {
       session.handleApprovalResponse(msg.id, !!msg.approved);
     } else if (msg.type === 'cancel') {
       session.handleCancel();
+    } else if (msg.type === 'mcp-list') {
+      session.handleMcpList();
+    } else if (msg.type === 'mcp-add') {
+      session.handleMcpAdd(msg.payload);
+    } else if (msg.type === 'mcp-remove') {
+      session.handleMcpRemove(msg.name);
     }
   });
 

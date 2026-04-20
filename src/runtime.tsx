@@ -6,6 +6,9 @@ import { compileComponent, type SendEvent, type SubmitEvent, type InteractionCon
 import { runtimeGlobals } from './runtime-globals.js';
 import type { AppError } from './types.js';
 
+type InputHandler = Parameters<typeof Ink.useInput>[0];
+type TextInputProps = React.ComponentProps<typeof TextInput>;
+
 interface RuntimeProps {
   source: string | null;
   sendEvent: SendEvent;
@@ -29,14 +32,14 @@ export function Runtime({ source, sendEvent, submitEvent, context, focused, onCo
       Ink.useFocus({ ...opts, isActive: focusedRef.current }),
 
     // Gate keyboard: swallow all input when pane is inactive.
-    useInput: (handler: Ink.Handler, opts?: { isActive?: boolean }) =>
+    useInput: (handler: InputHandler, opts?: { isActive?: boolean }) =>
       Ink.useInput(handler, { ...opts, isActive: focusedRef.current && (opts?.isActive ?? true) }),
 
     // Gate TextInput: force focus={false} when pane is inactive.
-    TextInput: (props: Record<string, unknown>) =>
+    TextInput: (props: TextInputProps) =>
       React.createElement(TextInput, {
         ...props,
-        focus: focusedRef.current && (props.focus ?? true),
+        focus: focusedRef.current && (typeof props.focus === 'boolean' ? props.focus : true),
       }),
   }), []);
 
