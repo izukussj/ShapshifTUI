@@ -7,7 +7,8 @@ import { Button, FocusActiveContext } from './components.js';
 import { extractCodeBlock, type SendEvent, type SubmitEvent, type InteractionContext } from './sandbox.js';
 import { McpPanel, type McpPanelMode } from './mcp.js';
 import { PluginGuidePanel } from './plugin-guide.js';
-import type { AppError, ApprovalRequest, ChatMessage, InteractionRecord, McpAddPayload, McpOpResult, McpServer, ServerMessage } from './types.js';
+import { SavedViewsPanel } from './saved-state.js';
+import type { AppError, ApprovalRequest, ChatMessage, InteractionRecord, McpAddPayload, McpOpResult, McpServer, SavedViewSummary, ServerMessage } from './types.js';
 import { onMouse, setMouseEnabled, isMouseEnabled } from './mouse.js';
 
 const HISTORY_LIMIT = 50;
@@ -16,10 +17,20 @@ const MAX_RETRIES = 2;
 type Pane = 'chat' | 'runtime';
 type ConnectionState = 'connected' | 'reconnecting' | 'lost';
 type McpAdminView = { mode: McpPanelMode; name?: string };
-type AdminView = McpAdminView | { mode: 'plugin' };
+type AdminView = McpAdminView | { mode: 'plugin' } | { mode: 'saves'; action: 'load' | 'fork' };
 
 interface AppProps {
   client: Client;
+}
+
+function latestSourceFromMessages(messages: ChatMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.sender !== 'ai') continue;
+    const block = extractCodeBlock(m.content);
+    if (block) return block;
+  }
+  return null;
 }
 
 export function App({ client }: AppProps): React.ReactElement {
@@ -47,6 +58,8 @@ export function App({ client }: AppProps): React.ReactElement {
   const [mcpServers, setMcpServers] = useState<McpServer[] | null>(null);
   const [mcpLoading, setMcpLoading] = useState(false);
   const [mcpLastOp, setMcpLastOp] = useState<McpOpResult | null>(null);
+  const [savedViews, setSavedViews] = useState<SavedViewSummary[] | null>(null);
+  const [viewsLoading, setViewsLoading] = useState(false);
   // Some terminals update process.stdout.columns/rows on SIGWINCH but Ink may
   // not repaint until the next input event. This no-op state bump makes resize
   // responsiveness immediate for the shell and generated runtime components.
@@ -178,6 +191,13 @@ export function App({ client }: AppProps): React.ReactElement {
     console.error('[shapeshiftui]', err);
   }, []);
 
+  const pushSystem = useCallback((content: string) => {
+    setMessages((prev) => [
+      ...prev,
+      { id: `sys-${Date.now()}`, sender: 'system', content, timestamp: Date.now() },
+    ]);
+  }, []);
+
   useEffect(() => {
     const handler = (msg: ServerMessage) => {
       if (msg.type === 'message') {
@@ -195,6 +215,7 @@ export function App({ client }: AppProps): React.ReactElement {
         setConnectionState((s) => (s === 'reconnecting' ? 'connected' : s));
       } else if (msg.type === 'error') {
         if (msg.error.code.startsWith('mcp_')) setMcpLoading(false);
+        if (msg.error.code.startsWith('view_')) setViewsLoading(false);
         reportError(msg.error);
       } else if (msg.type === 'status') {
         setStatus(msg.text);
@@ -203,20 +224,14 @@ export function App({ client }: AppProps): React.ReactElement {
           ...msg.messages,
           { id: `sys-${Date.now()}`, sender: 'system', content: `loaded "${msg.name}"`, timestamp: Date.now() },
         ]);
-        setInteractions([]);
+        setInteractions(msg.interactions ?? []);
         setScrollOffset(0);
         retryCount.current = 0;
-        // Scan backward for the most recent AI message that actually carries a
-        // layout — a trailing plain-text turn would otherwise blank the canvas.
-        let code: string | null = null;
-        for (let i = msg.messages.length - 1; i >= 0; i--) {
-          const m = msg.messages[i];
-          if (m?.sender !== 'ai') continue;
-          const block = extractCodeBlock(m.content);
-          if (block) { code = block; break; }
-        }
-        setSource(code);
+        setSource(msg.source ?? latestSourceFromMessages(msg.messages));
         setRuntimeScrollOffset(0);
+        setViewsLoading(false);
+        setAdminView(null);
+        setActivePane('runtime');
       } else if (msg.type === 'approval_request') {
         setApprovals((prev) => [...prev, msg.request]);
       } else if (msg.type === 'mcp_list_result') {
@@ -230,11 +245,33 @@ export function App({ client }: AppProps): React.ReactElement {
           setMcpLoading(true);
           client.send({ type: 'mcp-list' });
         }
+      } else if (msg.type === 'views_list_result') {
+        setSavedViews(msg.views);
+        setViewsLoading(false);
+      } else if (msg.type === 'view_forked') {
+        const view = msg.view;
+        setMessages([
+          ...view.messages,
+          {
+            id: `sys-${Date.now()}`,
+            sender: 'system',
+            content: `started from "${view.name}"`,
+            timestamp: Date.now(),
+          },
+        ]);
+        setSource(view.source ?? latestSourceFromMessages(view.messages));
+        setInteractions(view.interactions);
+        setScrollOffset(0);
+        setRuntimeScrollOffset(0);
+        setViewsLoading(false);
+        setAdminView(null);
+        setActivePane('runtime');
+        retryCount.current = 0;
       }
     };
     const remove = client.onMessage(handler);
     return remove;
-  }, [client, reportError]);
+  }, [client, pushSystem, reportError]);
 
   // Called by Runtime when compilation fails — auto-retries with the backend.
   const onCompileError = useCallback(
@@ -254,13 +291,6 @@ export function App({ client }: AppProps): React.ReactElement {
     [client, reportError],
   );
 
-  const pushSystem = useCallback((content: string) => {
-    setMessages((prev) => [
-      ...prev,
-      { id: `sys-${Date.now()}`, sender: 'system', content, timestamp: Date.now() },
-    ]);
-  }, []);
-
   const openMcp = useCallback((mode: McpPanelMode, name?: string) => {
     setAdminView({ mode, name });
     setActivePane('runtime');
@@ -272,6 +302,15 @@ export function App({ client }: AppProps): React.ReactElement {
     } else {
       setMcpLoading(false);
     }
+  }, [client]);
+
+  const openSaves = useCallback((action: 'load' | 'fork') => {
+    setAdminView({ mode: 'saves', action });
+    setActivePane('runtime');
+    setRuntimeScrollOffset(0);
+    setSavedViews(null);
+    setViewsLoading(true);
+    client.send({ type: 'list-views' });
   }, [client]);
 
   const onSend = useCallback(
@@ -286,12 +325,20 @@ export function App({ client }: AppProps): React.ReactElement {
           return;
         }
         if (cmd === '/load') {
-          if (!arg) return pushSystem('usage: /load <name>');
+          if (!arg) {
+            openSaves('load');
+            return pushSystem('opened saves');
+          }
           client.send({ type: 'load', name: arg });
           return;
         }
-        if (cmd === '/views' || cmd === '/list') {
-          client.send({ type: 'list-views' });
+        if (cmd === '/fork' || cmd === '/start') {
+          if (!arg) {
+            openSaves('fork');
+            return pushSystem('opened saves');
+          }
+          setViewsLoading(true);
+          client.send({ type: 'fork-view', name: arg });
           return;
         }
         if (cmd === '/delete' || cmd === '/rm') {
@@ -328,7 +375,8 @@ export function App({ client }: AppProps): React.ReactElement {
             'commands:\n' +
               '  /save <name>    save the current view\n' +
               '  /load <name>    restore a saved view\n' +
-              '  /views          list saved views\n' +
+              '  /load           list saves\n' +
+              '  /fork <name>    start fresh from a save (/fork lists when empty)\n' +
               '  /mcp list       list Codex MCP servers\n' +
               '  /mcp add <name> open native add form\n' +
               '  /mcp remove <name> confirm removal\n' +
@@ -351,12 +399,33 @@ export function App({ client }: AppProps): React.ReactElement {
       setStatus(null);
       client.send({ type: 'chat', content, interactions });
     },
-    [client, interactions, openMcp, pushSystem],
+    [client, interactions, openMcp, openSaves, pushSystem],
   );
 
   const refreshMcp = useCallback(() => {
     setMcpLoading(true);
     client.send({ type: 'mcp-list' });
+  }, [client]);
+
+  const refreshViews = useCallback(() => {
+    setViewsLoading(true);
+    client.send({ type: 'list-views' });
+  }, [client]);
+
+  const loadView = useCallback((name: string) => {
+    setAdminView(null);
+    client.send({ type: 'load', name });
+  }, [client]);
+
+  const forkView = useCallback((name: string) => {
+    setViewsLoading(true);
+    client.send({ type: 'fork-view', name });
+  }, [client]);
+
+  const deleteView = useCallback((name: string) => {
+    client.send({ type: 'delete-view', name });
+    setViewsLoading(true);
+    client.send({ type: 'list-views' });
   }, [client]);
 
   const addMcp = useCallback((payload: McpAddPayload) => {
@@ -447,6 +516,18 @@ export function App({ client }: AppProps): React.ReactElement {
               {adminView?.mode === 'plugin' ? (
                 <PluginGuidePanel
                   focused={activePane === 'runtime' && !pendingApproval}
+                  onClose={closeAdminView}
+                />
+              ) : adminView?.mode === 'saves' ? (
+                <SavedViewsPanel
+                  views={savedViews}
+                  loading={viewsLoading}
+                  focused={activePane === 'runtime' && !pendingApproval}
+                  availableRows={availableRows}
+                  action={adminView.action}
+                  onRefresh={refreshViews}
+                  onSelect={adminView.action === 'fork' ? forkView : loadView}
+                  onDelete={deleteView}
                   onClose={closeAdminView}
                 />
               ) : adminView ? (

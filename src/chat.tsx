@@ -12,8 +12,8 @@ interface SlashCommand {
 
 const COMMANDS: SlashCommand[] = [
   { name: '/save', args: '<name>', help: 'save the current view for later', example: '/save dashboard' },
-  { name: '/load', args: '<name>', help: 'restore a saved view', example: '/load dashboard' },
-  { name: '/views', args: '', help: 'list saved views', example: '/views' },
+  { name: '/load', args: '[name]', help: 'list or restore saved views', example: '/load dashboard' },
+  { name: '/fork', args: '[name]', help: 'list or start fresh from a save', example: '/fork good-base' },
   { name: '/mcp', args: '<list|add|remove>', help: 'manage Codex MCP servers', example: '/mcp list' },
   { name: '/plugin', args: '', help: 'show Codex plugin setup guidance', example: '/plugin' },
   { name: '/delete', args: '<name>', help: 'remove a saved view', example: '/delete dashboard' },
@@ -100,7 +100,7 @@ export function Chat({
   const submit = (value: string) => {
     // Enter progresses the slash menu: complete if the draft is a prefix, or
     // send if the draft already matches an argless command. Without this,
-    // argless commands (/views, /help) loop — Enter would just re-complete
+    // argless commands (/help) loop — Enter would just re-complete
     // to the same string and never reach onSend.
     if (suggestions.length > 0) {
       const picked = suggestions[selectedIndex] ?? suggestions[0]!;

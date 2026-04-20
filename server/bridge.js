@@ -155,6 +155,16 @@ class Session {
     });
   }
 
+  handleUnsupportedSavedState(action) {
+    this.emitError({
+      source: 'bridge',
+      code: 'view_unsupported',
+      severity: 'warn',
+      recoverable: true,
+      message: `${action} requires the Codex bridge. Start with Codex CLI available, or run npm run codex-bridge.`,
+    });
+  }
+
   async handleChat(content, clientInteractions) {
     // Merge incoming interactions into session history.
     if (clientInteractions?.length) {
@@ -268,6 +278,15 @@ wss.on('connection', (ws) => {
       session.handleChat(msg.content, msg.interactions);
     } else if (msg.type === 'event') {
       session.handleEvent(msg.eventType, msg.data);
+    } else if (msg.type === 'list-views') {
+      ws.send(JSON.stringify({ type: 'views_list_result', views: [] }));
+    } else if (
+      msg.type === 'save' ||
+      msg.type === 'load' ||
+      msg.type === 'delete-view' ||
+      msg.type === 'fork-view'
+    ) {
+      session.handleUnsupportedSavedState(msg.type);
     } else if (msg.type === 'mcp-list' || msg.type === 'mcp-add' || msg.type === 'mcp-remove') {
       session.handleUnsupportedMcpAdmin();
     }

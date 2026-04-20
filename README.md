@@ -108,6 +108,7 @@ src/
   app.tsx            root component — chat pane + runtime pane, keybindings
   chat.tsx           message history, slash-command menu, input
   mcp.tsx            native Codex MCP manager panel
+  saved-state.tsx    native saved-view browser panel
   runtime.tsx        mounts the compiled sandbox component
   sandbox.ts         esbuild transpile + vm.runInContext
   runtime-globals.ts globals exposed to sandboxed components
@@ -252,6 +253,18 @@ For Codex plugins, ShapeshifTUI deliberately does not install or configure them 
 ```
 
 That opens a native guide telling the user to configure plugins inside Codex itself, then return to ShapeshifTUI. Plugin flows can involve auth, browser handoffs, or interactive marketplace steps, so they belong in Codex unless Codex exposes stable non-interactive plugin CRUD commands.
+
+### Saves and forks
+
+Saved views are named restores for the current directory. Forking starts a fresh Codex thread from one of those saves, so you can reuse the same starting point repeatedly:
+
+```text
+/save dashboard
+/load dashboard
+/load          # opens the save list
+/fork dashboard
+/fork          # opens the same save list, with Start from save actions
+```
 
 ## Roadmap
 

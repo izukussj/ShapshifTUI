@@ -51,6 +51,90 @@ function viewFile(cwd, name) {
   return path.join(viewDir(cwd), `${encodeURIComponent(name)}.json`);
 }
 
+function safeMessages(value) {
+  return Array.isArray(value)
+    ? value.filter((m) =>
+      m &&
+      typeof m === 'object' &&
+      typeof m.id === 'string' &&
+      typeof m.sender === 'string' &&
+      typeof m.content === 'string' &&
+      typeof m.timestamp === 'number')
+    : [];
+}
+
+function safeInteractions(value) {
+  return Array.isArray(value)
+    ? value.filter((e) =>
+      e &&
+      typeof e === 'object' &&
+      typeof e.eventType === 'string' &&
+      typeof e.timestamp === 'number')
+    : [];
+}
+
+function latestSourceFromMessages(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.sender !== 'ai' || typeof message.content !== 'string') continue;
+    const match = message.content.match(/```shapeshiftui\s*\n([\s\S]*?)```/);
+    if (match?.[1]) return match[1].trim();
+  }
+  return null;
+}
+
+function summarizeView(obj) {
+  return {
+    name: obj.name,
+    savedAt: typeof obj.saved_at === 'number' ? obj.saved_at : null,
+    turns: Array.isArray(obj.messages) ? obj.messages.length : 0,
+  };
+}
+
+function readJsonFiles(dir, code) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((f) => f.endsWith('.json'))
+    .map((f) => {
+      try {
+        return JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+      } catch (err) {
+        logSilent(code, `skipping unreadable JSON file ${f}`, err);
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+function listViewSummaries(cwd) {
+  return readJsonFiles(viewDir(cwd), 'view_corrupt')
+    .map(summarizeView)
+    .filter((v) => typeof v.name === 'string' && v.name.length > 0)
+    .sort((a, b) => (b.savedAt ?? 0) - (a.savedAt ?? 0) || a.name.localeCompare(b.name));
+}
+
+function savedViewContextPrompt(saved) {
+  const messages = safeMessages(saved.messages).slice(-30);
+  const transcript = messages
+    .map((m) => {
+      const text = m.content
+        .replace(/```shapeshiftui\s*\n[\s\S]*?```/g, '[layout code omitted here; current source is provided below]')
+        .trim()
+        .slice(0, 2500);
+      return `${m.sender}: ${text || '(layout)'}`;
+    })
+    .join('\n\n');
+  const source = typeof saved.source === 'string' && saved.source.trim()
+    ? `\n\nCurrent rendered layout source:\n\`\`\`shapeshiftui\n${saved.source}\n\`\`\``
+    : '';
+  return [
+    `You are starting a fresh ShapeshifTUI run from saved point "${saved.name}".`,
+    'Use the saved transcript and current rendered source as prior context, then answer the next user request normally.',
+    transcript ? `\nRecent saved transcript:\n${transcript}` : '',
+    source,
+  ].join('\n');
+}
+
 const PORT = process.env.CODEX_BRIDGE_PORT || process.env.PORT || 8080;
 const CODEX_BIN = process.env.CODEX_BIN || 'codex';
 const SANDBOX = process.env.CODEX_SANDBOX || 'read-only';
@@ -74,6 +158,9 @@ class Session {
     // Transcript of chat-visible turns (user + ai + system), used for save/load.
     // Not the same as this.log() which is the full JSONL debug stream.
     this.transcript = [];
+    // When forking from a save, the next user turn seeds a fresh Codex thread
+    // with the saved context instead of resuming an append-only historical thread.
+    this.pendingForkContext = null;
     // Pending approval gate entries, keyed by id. Value: { eventType, data }.
     this.pendingApprovals = new Map();
     // The codex child for the in-flight turn, or null when idle. Lets
@@ -146,7 +233,10 @@ class Session {
     }
     const changed = resolved !== this.cwd;
     this.cwd = resolved;
-    if (changed) this.killHotSpare();
+    if (changed) {
+      this.pendingForkContext = null;
+      this.killHotSpare();
+    }
     this.log({ type: 'init', cwd: resolved });
     this.send('ai', `Working in \`${resolved}\`.`);
   }
@@ -504,7 +594,12 @@ class Session {
     this.mergeInteractions(clientInteractions);
     this.recordTurn('user', content);
     this.log({ type: 'incoming', kind: 'chat', content, interactions: clientInteractions });
-    await this.runTurn(content + this.interactionContext());
+    const forkContext = this.pendingForkContext;
+    this.pendingForkContext = null;
+    const prompt = forkContext
+      ? `${forkContext}\n\nNext user request: ${content}`
+      : content;
+    await this.runTurn(prompt + this.interactionContext());
   }
 
   async handleEvent(eventType, data) {
@@ -543,6 +638,8 @@ class Session {
       cwd: this.cwd,
       thread_id: this.threadId,
       messages: this.transcript,
+      source: latestSourceFromMessages(this.transcript),
+      interactions: this.interactions,
       saved_at: Date.now(),
     };
     fs.writeFileSync(viewFile(this.cwd, name), JSON.stringify(payload, null, 2));
@@ -577,40 +674,73 @@ class Session {
     }
     this.threadId = saved.thread_id || null;
     this.cwd = saved.cwd || this.cwd;
-    this.transcript = Array.isArray(saved.messages) ? saved.messages : [];
-    this.interactions = [];
+    this.transcript = safeMessages(saved.messages);
+    this.interactions = safeInteractions(saved.interactions);
+    this.pendingForkContext = null;
     this.ws.send(JSON.stringify({
       type: 'restore',
       name,
       messages: this.transcript,
+      source: typeof saved.source === 'string' ? saved.source : latestSourceFromMessages(this.transcript),
+      interactions: this.interactions,
     }));
     this.log({ type: 'load', name, thread_id: this.threadId, cwd: this.cwd });
   }
 
   handleListViews() {
-    const dir = viewDir(this.cwd);
-    let items = [];
-    if (fs.existsSync(dir)) {
-      items = fs.readdirSync(dir)
-        .filter((f) => f.endsWith('.json'))
-        .map((f) => {
-          try {
-            const obj = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-            return {
-              name: obj.name,
-              saved: new Date(obj.saved_at).toISOString().slice(0, 10),
-              turns: Array.isArray(obj.messages) ? obj.messages.length : 0,
-            };
-          } catch (err) {
-            logSilent('view_corrupt', `list-views: skipping unreadable save ${f}`, err);
-            return null;
-          }
-        })
-        .filter(Boolean)
-        .sort((a, b) => (a.name < b.name ? -1 : 1));
+    this.ws.send(JSON.stringify({ type: 'views_list_result', views: listViewSummaries(this.cwd) }));
+  }
+
+  handleForkView(name) {
+    if (typeof name !== 'string' || !name.trim()) {
+      this.emitError({ source: 'user', code: 'view_bad_args', severity: 'info', recoverable: true, message: 'fork: missing save name' });
+      return;
     }
-    const jsx = renderViewsListJsx(items, this.cwd);
-    this.send('ai', `Saved views for \`${this.cwd}\`:\n\n\`\`\`shapeshiftui\n${jsx}\n\`\`\``);
+    const file = viewFile(this.cwd, name.trim());
+    if (fs.existsSync(file)) {
+      let saved;
+      try {
+        saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch (err) {
+        this.emitError({
+          source: 'bridge',
+          code: 'view_corrupt',
+          severity: 'warn',
+          recoverable: true,
+          message: `fork: corrupt save file: ${err.message}`,
+          details: { file, err: err.message },
+        });
+        return;
+      }
+      const messages = safeMessages(saved.messages);
+      const interactions = safeInteractions(saved.interactions);
+      const source = typeof saved.source === 'string'
+        ? saved.source
+        : latestSourceFromMessages(messages);
+      const view = {
+        name: saved.name || name.trim(),
+        messages,
+        source,
+        interactions,
+      };
+
+      this.threadId = null;
+      this.transcript = messages;
+      this.interactions = interactions;
+      this.pendingForkContext = savedViewContextPrompt(view);
+      this.killHotSpare();
+      this.ws.send(JSON.stringify({ type: 'view_forked', view }));
+      this.log({ type: 'fork-view', name: view.name, messages: messages.length });
+      return;
+    }
+
+    this.emitError({
+      source: 'user',
+      code: 'view_not_found',
+      severity: 'info',
+      recoverable: true,
+      message: `fork: no save named "${name}" for this directory`,
+    });
   }
 
   runCodex(args, { stdinChunk } = {}) {
@@ -751,38 +881,6 @@ class Session {
   }
 }
 
-function renderViewsListJsx(items, cwd) {
-  if (items.length === 0) {
-    return `() => (
-  <Box flexDirection="column">
-    <Text dimColor>No saved views for ${JSON.stringify(cwd)}.</Text>
-    <Text dimColor>Use /save &lt;name&gt; after a view is rendered.</Text>
-  </Box>
-)`;
-  }
-  return `({ submitEvent }) => {
-  const rows = ${JSON.stringify(items)};
-  return (
-    <Box flexDirection="column">
-      <Text bold>Saved views ({rows.length})</Text>
-      <Box marginTop={1} />
-      <Table
-        columns={[
-          { key: 'name', label: 'Name', width: 28 },
-          { key: 'saved', label: 'Saved', width: 12 },
-          { key: 'turns', label: 'Turns', width: 6, align: 'right' },
-        ]}
-        rows={rows}
-        onRowPress={(row) => submitEvent('load-view', { name: row.name })}
-      />
-      <Box marginTop={1}>
-        <Text dimColor>Click a row to load. /delete &lt;name&gt; to remove.</Text>
-      </Box>
-    </Box>
-  );
-}`;
-}
-
 const wss = new WebSocketServer({ port: PORT });
 console.log(`shapeshiftui codex bridge on ws://localhost:${PORT}`);
 console.log(`  sandbox: ${SANDBOX}   binary: ${CODEX_BIN}   cwd: ${CODEX_CWD}`);
@@ -825,6 +923,8 @@ wss.on('connection', (ws) => {
       session.handleMcpAdd(msg.payload);
     } else if (msg.type === 'mcp-remove') {
       session.handleMcpRemove(msg.name);
+    } else if (msg.type === 'fork-view') {
+      session.handleForkView(msg.name);
     }
   });
 

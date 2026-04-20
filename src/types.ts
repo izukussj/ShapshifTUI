@@ -98,6 +98,19 @@ export interface McpOpResult {
   message?: string;
 }
 
+export interface SavedViewSummary {
+  name: string;
+  savedAt: number | null;
+  turns: number;
+}
+
+export interface ForkedView {
+  name: string;
+  messages: ChatMessage[];
+  source: string | null;
+  interactions: InteractionRecord[];
+}
+
 /**
  * Wire protocol — minimal JSON over websocket. No JSON-RPC envelope, no
  * handshake. The first message either side sends sets the contract.
@@ -106,10 +119,18 @@ export type ServerMessage =
   | { type: 'message'; message: ChatMessage }
   | { type: 'error'; error: AppError }
   | { type: 'status'; text: string | null }
-  | { type: 'restore'; name: string; messages: ChatMessage[] }
+  | {
+      type: 'restore';
+      name: string;
+      messages: ChatMessage[];
+      source?: string | null;
+      interactions?: InteractionRecord[];
+    }
   | { type: 'approval_request'; request: ApprovalRequest }
   | { type: 'mcp_list_result'; servers: McpServer[] }
-  | { type: 'mcp_op_result'; result: McpOpResult };
+  | { type: 'mcp_op_result'; result: McpOpResult }
+  | { type: 'views_list_result'; views: SavedViewSummary[] }
+  | { type: 'view_forked'; view: ForkedView };
 
 export type ClientMessage =
   | { type: 'init'; cwd: string }
@@ -123,4 +144,5 @@ export type ClientMessage =
   | { type: 'cancel' }
   | { type: 'mcp-list' }
   | { type: 'mcp-add'; payload: McpAddPayload }
-  | { type: 'mcp-remove'; name: string };
+  | { type: 'mcp-remove'; name: string }
+  | { type: 'fork-view'; name: string };
