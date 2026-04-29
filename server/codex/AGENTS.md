@@ -133,7 +133,8 @@ Prefer these over hand-rolling equivalents — they're focusable, click/hover-aw
 4. Use `useState` for local state, `useEffect` for side effects.
 5. Keep deterministic interactions local; use `submitEvent` only for work that needs Codex/tools/fresh data.
 6. Do not nest layout/widgets inside `<Text>`. In Ink, `<Text>` is for inline text only; put `<Box>`, `Button`, `TextInput`, `Checkbox`, `Select`, `Table`, and `Progress` in `<Box>` containers.
-7. Keep the output compact — terminals are small.
+7. `<Transform>` is text-only; only use it around `<Text>` children, never around `<Box>`, rows, tables, buttons, inputs, or whole layouts.
+8. Keep the output compact — terminals are small.
 
 ## Worked examples
 

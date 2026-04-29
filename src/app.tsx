@@ -284,7 +284,7 @@ export function App({ client }: AppProps): React.ReactElement {
         message: `${label} (retry ${retryCount.current}/${MAX_RETRIES}): ${err.message}`,
       });
       const inkHint = err.code === 'render_failed'
-        ? '\nInk tree rule: <Box>, Button, TextInput, Checkbox, Select, Table, and Progress must not be nested inside <Text>. Put layout/widgets in <Box> containers and keep <Text> for inline text only.'
+        ? '\nInk tree rule: <Box>, Button, TextInput, Checkbox, Select, Table, and Progress must not be nested inside <Text>. Put layout/widgets in <Box> containers and keep <Text> for inline text only. <Transform> is text-only; only wrap <Text> children with it.'
         : '';
       client.send({
         type: 'chat',

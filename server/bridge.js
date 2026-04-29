@@ -68,7 +68,8 @@ Your component is a single arrow function expression (NOT a default export, NOT 
 10. You can include explanatory text before/after the code block.
 11. Every button, row, or form that calls \`submitEvent(...)\` must update local state first and render compact feedback inside the component, such as "Refresh sent..." or "Action sent...". Reserve a stable feedback line from the first render, for example \`<Box minHeight={1}><Text>{notice || ' '}</Text></Box>\`, so showing feedback does not add/remove rows or shift the layout. Do not rely on the outer app's thinking indicator as the only user feedback. Pure local interactions can show state changes directly and do not need submitted-action feedback.
 12. Do not nest layout/widgets inside \`<Text>\`. In Ink, \`<Text>\` is for inline text only; put \`<Box>\`, Button, TextInput, Checkbox, Select, Table, and Progress in \`<Box>\` containers.
-13. Use \`useStdout()\` for responsive layouts. Derive a compact mode from terminal width, reduce columns on narrow panes, truncate long values before rendering, keep action/notice/footer areas fixed-width or pre-reserved, and avoid changing button labels in a way that resizes rows.
+13. \`<Transform>\` is text-only; only use it around \`<Text>\` children, never around \`<Box>\`, rows, tables, buttons, inputs, or whole layouts.
+14. Use \`useStdout()\` for responsive layouts. Derive a compact mode from terminal width, reduce columns on narrow panes, truncate long values before rendering, keep action/notice/footer areas fixed-width or pre-reserved, and avoid changing button labels in a way that resizes rows.
 
 ### Example
 User: "make a todo list"

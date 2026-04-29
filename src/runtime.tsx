@@ -132,9 +132,9 @@ export function Runtime({
       ) : null}
       <Box height={viewportRows} overflowY="hidden" flexDirection="column">
         <RuntimeErrorBoundary key={source} onError={onRenderError}>
-          <Ink.Transform transform={(output) => cropOutput(output, scrollOffset, viewportRows)}>
+          <Box flexDirection="column" flexShrink={0} marginTop={scrollOffset > 0 ? -scrollOffset : 0}>
             <Component sendEvent={sendEvent} submitEvent={submitEvent} context={context} />
-          </Ink.Transform>
+          </Box>
         </RuntimeErrorBoundary>
       </Box>
     </Box>
@@ -170,12 +170,4 @@ class RuntimeErrorBoundary extends React.Component<RuntimeErrorBoundaryProps, Ru
       </Box>
     );
   }
-}
-
-function cropOutput(output: string, offset: number, rows: number): string {
-  const visibleRows = Math.max(1, rows);
-  const lines = output.split('\n');
-  const maxStart = Math.max(0, lines.length - visibleRows);
-  const start = Math.min(Math.max(0, offset), maxStart);
-  return lines.slice(start, start + visibleRows).join('\n');
 }
