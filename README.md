@@ -1,224 +1,142 @@
 # ShapeshifTUI
 
-> Chat-driven terminal UI where the AI ships React/Ink components that run live in a sandbox.
+> A Codex-powered terminal workbench where developer workflows turn into live, interactive Ink UIs.
 
-You describe what you want. The AI writes a JSX component. It renders in your terminal. You interact with it. Pure UI actions run locally; submitted actions flow back to the AI. Repeat.
+ShapeshifTUI is not a chat skin. It is a two-pane TUI for building disposable developer tools on demand: repo dashboards, process inspectors, diff viewers, MCP-backed inbox/PR triage, deployment checklists, log explorers, and any other workflow where a static command output is too flat but a full app would be overkill.
 
+You ask for a view. Codex runs the needed tools, embeds real results into a React/Ink component, and ShapeshifTUI mounts it in the runtime pane. Local UI interactions stay instant. Actions that need tools or fresh data go back through Codex with approval when needed.
+
+```text
+┌─ chat ─────────────────────────────┐┌─ runtime ───────────────────────────────────────┐
+│ you  show repo health for this cwd ││ Repo health                                     │
+│                                    ││ branch: main        dirty files: 4              │
+│ ai   rendered a live workspace     ││ tests: failing      package: shapeshiftui       │
+│                                    ││                                                │
+│ ❯                                  ││ Changed files                                  │
+│                                    ││  M src/runtime.tsx        render guard          │
+│                                    ││  M src/chat.tsx           paste handling        │
+│                                    ││                                                │
+│                                    ││ [Refresh] [Run tests] [Open diff] [Save view]   │
+└────────────────────────────────────┘└────────────────────────────────────────────────┘
+  Ctrl+A chat   Ctrl+E runtime   PgUp/PgDn scroll   Ctrl+C quit
 ```
-┌─ chat ───────────────┐┌─ runtime ──────────────────────┐
-│ you  make a todo list││ Todo List (2 remaining)        │
-│                      ││                                │
-│ ai   Here you go:    ││  [ ] buy milk                  │
-│                      ││  [ ] finish the readme         │
-│ >                    ││  [x] commit the v2 rewrite     │
-│                      ││                                │
-│                      ││  > _________ [Add]             │
-└──────────────────────┘└────────────────────────────────┘
-  Ctrl+A chat   Ctrl+E runtime   Ctrl+C quit
+
+## Why Use It
+
+- Turn one-off shell/MCP investigations into real terminal interfaces.
+- Keep Codex in the loop for reasoning, tool use, repairs, and regenerated views.
+- Keep deterministic layout interactions local: tabs, filters, sorting, row expansion, selection, pagination, and form drafts do not require another model turn.
+- Use approval-gated actions for shell/MCP operations such as killing a process, archiving mail, running tests, or opening a repo detail view.
+- Save a useful generated view, then load it later or fork from it repeatedly as a fresh Codex thread.
+
+Good prompts look like:
+
+```text
+show me the health of this repo: branch, dirty files, package scripts, recent commits
+build a compact process inspector sorted by CPU with kill buttons
+show my open PRs and which ones need review
+inspect disk usage under ./node_modules and make it drillable
+make a release checklist from package.json, git status, and the latest commits
+show unread Gmail threads grouped by action needed
 ```
 
-## How it works
+## Quick Start
 
-1. You type a message in the left pane.
-2. The backend (Codex CLI by default, plain OpenAI as a fallback) responds with a JSX component inside a `shapeshiftui` fenced code block.
-3. `src/sandbox.ts` extracts the block, esbuild transpiles it, and it runs in a Node `vm` context with Ink, React, hooks, and custom widgets injected as globals.
-4. The component renders in the right pane.
-5. Deterministic UI actions stay inside the generated React component. `sendEvent` records silent context for the next real turn. `submitEvent` triggers an immediate AI response only when the action needs tools, fresh data, or regenerated UI.
+Requirements:
 
-## Requirements
-
-- Node.js ≥ 20
-- Either an authenticated [Codex CLI](https://developers.openai.com/codex) install (recommended) or an OpenAI API key
-
-## Quick start
-
-One command — the TUI spawns the bridge for you.
+- Node.js >= 20
+- Authenticated [Codex CLI](https://developers.openai.com/codex) recommended
+- Optional fallback: `OPENAI_API_KEY` for the plain OpenAI bridge
 
 ```bash
-# 1. Install & authenticate Codex once
-brew install codex && codex login   # or: npm i -g @openai/codex && codex login
+# Install and authenticate Codex once
+brew install codex && codex login
+# or: npm install -g @openai/codex && codex login
 
-# 2. Launch
-npx shapeshiftui                    # or: npm i -g shapeshiftui && shapeshiftui
+# Run against the current directory
+npx shapeshiftui
+
+# Run against a specific repo
+npx shapeshiftui --cwd ~/Projects/my-service
 ```
 
-First run detects `codex` on `PATH` and auto-spawns `server/codex-bridge.js` on `:8080`. No Codex? Set `OPENAI_API_KEY` (in your env or `.env.local`) and the CLI falls back to the plain OpenAI bridge. To point at a bridge you're running yourself, pass the WebSocket URL — e.g. `shapeshiftui ws://localhost:9000` (auto-spawn is skipped when a URL is given, or with `--no-serve`).
+On startup, the CLI checks for a bridge on `ws://localhost:8080`. If none is running and no URL was provided, it spawns the Codex bridge automatically. If Codex is unavailable but `OPENAI_API_KEY` is set, it falls back to the OpenAI bridge.
 
-Then type something like `make a counter` or `show me my processes` and watch it render.
-
-### Sandbox tiers
-
-Codex runs in `read-only` mode by default — it can run commands but can't write files. Opt into more:
+Connect to an existing bridge:
 
 ```bash
-shapeshiftui --write                       # edits inside --cwd (workspace-write)
-shapeshiftui --sandbox danger-full-access  # no sandboxing (use sparingly)
-shapeshiftui --sandbox read-only           # explicit, matches default
+shapeshiftui ws://localhost:9000 --no-serve
 ```
 
-`--write` is shorthand for `--sandbox workspace-write`. The flag only applies when ShapeshifTUI spawns the bridge itself — when connecting to an external bridge, that bridge's `CODEX_SANDBOX` at startup wins.
+## Sandbox Modes
 
-## Scripts
+Codex runs in `read-only` mode by default. It can inspect and execute read-only commands, but write operations are blocked unless you opt into a wider sandbox.
 
-| Command | What it does |
-|---------|--------------|
-| `npm run build` | Bundle the TUI to `dist/` via tsup |
-| `npm run dev` | Build in watch mode |
-| `npm start` | Launch the TUI (auto-spawns the Codex bridge when none is reachable) |
-| `npm run codex-bridge` | Start the Codex CLI bridge manually (see [Codex backend](#codex-backend) below) |
-| `npm run bridge` | Start the OpenAI bridge manually on `ws://localhost:8080` |
-| `npm run typecheck` | TypeScript check without emit |
-| `npm test` | Run the vitest suite |
-
-## Environment variables
-
-Backend-specific. Put them in `.env.local` or prefix the command.
-
-**OpenAI bridge (`server/bridge.js`):**
-
-| Variable | Default | Notes |
-|----------|---------|-------|
-| `OPENAI_API_KEY` | — | Required |
-| `MODEL` | `gpt-5.4` | Any chat-completions model |
-| `PORT` | `8080` | WebSocket port |
-
-**Codex bridge (`server/codex-bridge.js`):** see [Codex backend](#codex-backend).
-
-**Client (`src/cli.tsx`):**
-
-| Variable | Default | Notes |
-|----------|---------|-------|
-| `SHAPESHIFTUI_MOUSE` | on | Mouse tracking is on by default. Set to `0` to disable at launch (also toggleable at runtime with `Ctrl+P`). Hold Option (macOS) or Shift (most terminals) to select text while mouse is on. |
-
-## Architecture
-
-```
- ┌──────────┐    WebSocket    ┌────────────────┐   stdio / HTTPS
- │ TUI Client│ ◄────────────► │ bridge          │ ◄──────────────►  Codex CLI
- │ (Ink/React)│                │ (system prompt │                   or OpenAI
- └──────────┘                 │  + session)    │
-                              └────────────────┘
+```bash
+shapeshiftui --sandbox read-only           # default
+shapeshiftui --write                       # shorthand for workspace-write
+shapeshiftui --sandbox workspace-write     # edits inside --cwd only
+shapeshiftui --sandbox danger-full-access  # no sandboxing; use deliberately
 ```
 
-Source layout:
+The sandbox flag only applies when ShapeshifTUI spawns the bridge. If you connect to an already-running bridge, that process owns its sandbox.
 
-```
-src/
-  cli.tsx            entry point — opens WebSocket, mounts the Ink app
-  app.tsx            root component — chat pane + runtime pane, keybindings
-  chat.tsx           message history, slash-command menu, input
-  mcp.tsx            native Codex MCP manager panel
-  saved-state.tsx    native saved-view browser panel
-  runtime.tsx        mounts the compiled sandbox component
-  sandbox.ts         esbuild transpile + vm.runInContext
-  runtime-globals.ts globals exposed to sandboxed components
-  components.tsx     widget library (Button, Checkbox, Select, Table, Progress)
-  mouse.ts           SGR mouse parser + hover/click hooks
-  client.ts          WebSocket client with exponential-backoff reconnect
-  types.ts           wire protocol (ChatMessage, AppError, ServerMessage, …)
+## Core Workflow
 
-server/
-  bridge.js          OpenAI chat-completions bridge
-  codex-bridge.js    Codex CLI bridge (spawns `codex exec --json`)
-  codex/AGENTS.md    system prompt / contract consumed by the Codex bridge
+1. You describe a developer workflow in chat.
+2. The bridge asks Codex to gather real data with shell commands or MCP tools.
+3. Codex returns a `shapeshiftui` fenced React/Ink component.
+4. `src/sandbox.ts` transpiles the component with esbuild and evaluates it in a Node `vm` with a small runtime API.
+5. The runtime pane mounts the component.
+6. Pure UI interactions stay local. Submitted events go back through the bridge as a new Codex turn.
 
-scripts/
-  smoke-codex.mjs    end-to-end sanity check against a running bridge
-```
+The key distinction:
 
-## Component contract
+| Interaction | Path |
+|-------------|------|
+| Filter/sort/select/expand/paginate already-rendered data | local React state |
+| Record a local interaction as context for later | `sendEvent(...)` |
+| Refresh data, run shell, call MCP, navigate to a new data-backed view | `submitEvent(...)` |
 
-The AI is instructed to return a single arrow function:
+## Slash Commands
 
-```jsx
-({ sendEvent, submitEvent, context }) => {
-  const [count, setCount] = useState(0);
-  return (
-    <Box>
-      <Text>Count: {count}</Text>
-      <Button label="+1" onPress={() => {
-        setCount(c => c + 1);
-        sendEvent('inc', { value: count + 1 });
-      }} />
-    </Box>
-  );
-}
-```
+These commands are handled by ShapeshifTUI itself, not by generated layouts.
 
-Available in sandbox scope (no imports needed):
+| Command | Purpose |
+|---------|---------|
+| `/save <name>` | Save the current generated view for this working directory |
+| `/load` | Open the native save list |
+| `/load <name>` | Restore a saved view |
+| `/fork` | Open the save list in "start from save" mode |
+| `/fork <name>` | Start a fresh Codex thread from a saved view |
+| `/delete <name>` | Delete a saved view |
+| `/mcp list` | Open the native Codex MCP server list |
+| `/mcp add <name>` | Open the native MCP add form |
+| `/mcp remove <name>` | Confirm and remove an MCP server |
+| `/plugin` | Show Codex plugin setup guidance |
+| `/help` | Show command help |
 
-- **React**: `React`, `useState`, `useEffect`, `useRef`, `useMemo`, `useCallback`, `useReducer`
-- **Ink**: `Box`, `Text`, `Newline`, `Spacer`, `Static`, `Transform`, `useFocus`, `useFocusManager`, `useInput`, `useStdout`
-- **Widgets**: `TextInput`, `Button`, `Checkbox`, `Select`, `Table`, `Progress`
-
-Generated components can use `useStdout()` to adapt to terminal width. Prefer compact column sets, pre-reserved feedback rows, fixed-width action areas, and truncated long values so interactions do not shift the layout.
-
-Props the component receives:
-
-- `sendEvent(eventType, data?)` — silent, recorded locally, sent as context next turn
-- `submitEvent(eventType, data?)` — loud, triggers an immediate AI response
-- `context.events` — past interaction records
-
-Generated layouts should handle pure UI interactions locally with React state: tabs, filters, sorting, row selection, expand/collapse, counters, timers, pagination over embedded data, form drafts, and add/remove/toggle operations over component-local data. Use `sendEvent` only when that local state change should become context later. Use `submitEvent` for actions that need Codex/OpenAI, tools, filesystem or network access, external data, or a regenerated view.
-
-## Keyboard
+## Keybindings
 
 | Key | Action |
 |-----|--------|
 | `Ctrl+A` | Focus chat pane |
 | `Ctrl+E` | Focus runtime pane |
-| `Tab` | From chat → jump into runtime. Inside runtime, Tab cycles focus through buttons, inputs, and other focusable widgets. Use `Ctrl+A` to return to chat. |
+| `Tab` | From chat, jump to runtime; inside runtime, cycle focusable widgets |
 | `Enter` / `Space` | Activate focused button |
 | `PgUp` / `PgDn` | Scroll active pane |
 | Mouse wheel | Scroll pane under cursor |
-| `/` | Open slash-command menu (in chat) — `↑`/`↓` to browse, `Tab`/`Enter` to accept |
-| `Esc` | Cancel the in-flight turn or close an open dialog |
-| `Ctrl+K` | Toggle the keyboard cheatsheet |
+| `/` | Open slash-command menu in chat |
+| `Esc` | Cancel in-flight turn or close active dialog |
+| `Ctrl+K` | Toggle keybinding cheatsheet |
 | `Ctrl+P` | Toggle mouse tracking |
 | `Ctrl+C` | Quit |
 
-## Codex backend
+Mouse tracking is on by default. Set `SHAPESHIFTUI_MOUSE=0` to disable it at launch. Hold Option on macOS, or Shift in many terminals, to select text while mouse tracking is enabled.
 
-Use [OpenAI Codex CLI](https://developers.openai.com/codex) as the reasoning engine instead of the bare OpenAI bridge. This unlocks live system/service UIs: Codex runs real shell commands and MCP tools, embeds the results as literals in the JSX component, and wires up buttons to follow-up actions.
+## MCP Management
 
-### Setup
-
-```bash
-# 1. Install Codex CLI
-brew install codex   # or: npm install -g @openai/codex
-
-# 2. Authenticate
-codex login
-
-# 3. Start the bridge (uses server/codex/AGENTS.md for the system prompt)
-npm run codex-bridge
-
-# 4. In another terminal, launch the TUI
-npm run build && npm start
-```
-
-### What you can ask
-
-- `show me my processes` → sortable `ps` table with kill buttons
-- `show me my repos in ~/Projects` → repo list with git status, open button per row
-- `what's eating my disk` → `du` tree drill-down
-- `show my unread emails` *(requires Gmail MCP — see below)*
-- `what's the git diff on the current branch` → diff viewer
-
-Every data view has a **Refresh** button that re-runs the underlying tools.
-
-### Environment
-
-| Variable | Default | What it controls |
-|----------|---------|------------------|
-| `CODEX_BRIDGE_PORT` | `8080` | WebSocket port |
-| `CODEX_BIN` | `codex` | Codex CLI binary path |
-| `CODEX_MODEL` | (codex default) | Override the reasoning model — e.g. `gpt-5.4-mini`. Passed to `codex exec -m <model>`. Must be a model your Codex account is allowed to use |
-| `CODEX_SANDBOX` | `workspace-write` | Sandbox mode — one of `read-only`, `workspace-write`, `danger-full-access` |
-
-### MCP servers (recommended)
-
-The real power comes from Codex's MCP ecosystem. Open the native manager from chat:
+MCP turns Codex from repo assistant into a service workbench. ShapeshifTUI exposes a native MCP manager but does not edit `~/.codex/config.toml` directly. It shells out to Codex's own `codex mcp` subcommands, so Codex owns the schema and config migrations.
 
 ```text
 /mcp list
@@ -226,9 +144,7 @@ The real power comes from Codex's MCP ecosystem. Open the native manager from ch
 /mcp remove context7
 ```
 
-The panel lists configured servers, opens a native add form, and confirms removals before calling Codex's own `codex mcp` subcommands. ShapeshifTUI does not edit `~/.codex/config.toml` directly; Codex owns the file and schema.
-
-Equivalent CLI examples:
+Equivalent CLI commands:
 
 ```bash
 codex mcp list --json
@@ -237,40 +153,156 @@ codex mcp add docs --url https://example.com/mcp --bearer-token-env-var DOCS_TOK
 codex mcp remove context7
 ```
 
-Useful servers include:
+After any MCP add/remove, the bridge kills its hot-spare Codex process so the next turn sees the fresh MCP configuration.
 
-- **Gmail MCP** — inbox, compose, archive
-- **GitHub MCP** — PR review, issue browsing
-- **Filesystem MCP** — safe file operations outside the workspace
-- **Postgres / SQLite MCP** — query UIs
+## Saves And Forks
 
-After an add/remove, the bridge drops its pre-spawned Codex process so the next turn sees fresh MCP config.
-
-### Codex plugins
-
-For Codex plugins, ShapeshifTUI deliberately does not install or configure them directly. Use:
+Saves are named checkpoints for the current working directory. They store the chat transcript, rendered source, and interaction context.
 
 ```text
-/plugin
+/save release-dashboard
+/load release-dashboard
+/fork release-dashboard
 ```
 
-That opens a native guide telling the user to configure plugins inside Codex itself, then return to ShapeshifTUI. Plugin flows can involve auth, browser handoffs, or interactive marketplace steps, so they belong in Codex unless Codex exposes stable non-interactive plugin CRUD commands.
+Use `/load` when you want to restore a previous view. Use `/fork` when you want to start from the same saved context multiple times as fresh Codex threads.
 
-### Saves and forks
+## Runtime Contract
 
-Saved views are named restores for the current directory. Forking starts a fresh Codex thread from one of those saves, so you can reuse the same starting point repeatedly:
+Generated components are single arrow function expressions:
+
+```jsx
+({ sendEvent, submitEvent, context }) => {
+  const [filter, setFilter] = useState('dirty');
+  const rows = [
+    { path: 'src/runtime.tsx', status: 'M', area: 'runtime' },
+    { path: 'src/chat.tsx', status: 'M', area: 'input' }
+  ];
+
+  const visible = useMemo(
+    () => rows.filter((row) => filter === 'all' || row.status === 'M'),
+    [filter]
+  );
+
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Button label="Dirty" onPress={() => {
+          setFilter('dirty');
+          sendEvent('filter', { filter: 'dirty' });
+        }} />
+        <Button label="Refresh" onPress={() => {
+          submitEvent('refresh');
+        }} />
+      </Box>
+      {visible.map((row) => (
+        <Box key={row.path}>
+          <Box width={3}><Text>{row.status}</Text></Box>
+          <Text>{row.path}</Text>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+```
+
+Available globals:
+
+- React: `React`, `useState`, `useEffect`, `useRef`, `useMemo`, `useCallback`, `useReducer`
+- Ink: `Box`, `Text`, `Newline`, `Spacer`, `Static`, `Transform`, `useFocus`, `useFocusManager`, `useInput`, `useStdout`
+- Widgets: `TextInput`, `Button`, `Checkbox`, `Select`, `Table`, `Progress`
+
+Rules enforced by the prompt and guarded by the runtime:
+
+- Return one root `<Box>`.
+- Do not import or export.
+- Keep deterministic interactions local.
+- Use `submitEvent` only for work that needs Codex, tools, fresh data, or regenerated UI.
+- Do not nest layout/widgets inside `<Text>`. In Ink, `<Text>` is inline text only; put `Box`, `Button`, `TextInput`, `Checkbox`, `Select`, `Table`, and `Progress` in `Box` containers.
+- Use `Transform` only around `Text` children; it is not a layout wrapper.
+- Generated render errors are caught and sent back to Codex as repair prompts instead of crashing the app.
+
+## Architecture
 
 ```text
-/save dashboard
-/load dashboard
-/load          # opens the save list
-/fork dashboard
-/fork          # opens the same save list, with Start from save actions
+┌────────────────────┐   WebSocket    ┌──────────────────────┐   stdio/JSON
+│ Ink TUI client     │ ◄────────────► │ bridge               │ ◄──────────► Codex CLI
+│ chat + runtime     │                │ session + contracts  │              or OpenAI
+└────────────────────┘                └──────────────────────┘
 ```
 
-## Roadmap
+Source layout:
 
-Next up: an OpenClaw Channel plugin — persistent memory and a multi-channel surface so the same chat/component protocol can drive panes beyond the terminal.
+```text
+src/
+  cli.tsx             entry point, bridge auto-spawn, sandbox flags
+  app.tsx             app shell, panes, slash commands, status, approvals
+  chat.tsx            chat history, slash menu, paste-safe input
+  runtime.tsx         compiled component mount + render error boundary
+  sandbox.ts          esbuild transform + vm evaluation
+  runtime-globals.ts  globals exposed to generated components
+  components.tsx      Button, Checkbox, Select, Table, Progress
+  mcp.tsx             native Codex MCP manager
+  saved-state.tsx     native saved-view browser
+  mouse.ts            SGR mouse parser and click/hover hooks
+  client.ts           WebSocket client with reconnect
+  types.ts            shared wire protocol
+
+server/
+  codex-bridge.js     Codex CLI bridge using `codex exec --json`
+  bridge.js           OpenAI fallback bridge
+  codex/AGENTS.md     Codex-side component contract and operating rules
+
+tests/
+  chat-paste.test.ts
+  mouse.test.ts
+  runtime-error.test.ts
+```
+
+## Environment
+
+OpenAI fallback bridge:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OPENAI_API_KEY` | none | Required for `server/bridge.js` |
+| `MODEL` | `gpt-5.4` | Chat completions model |
+| `PORT` | `8080` | WebSocket port |
+
+Codex bridge:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CODEX_BRIDGE_PORT` | `8080` | WebSocket port |
+| `CODEX_BIN` | `codex` | Codex CLI binary |
+| `CODEX_MODEL` | Codex default | Optional `codex exec -m <model>` override |
+| `CODEX_SANDBOX` | `read-only` | `read-only`, `workspace-write`, or `danger-full-access` |
+
+Client:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `SHAPESHIFTUI_MOUSE` | on | Set to `0` to disable mouse tracking at launch |
+
+## Development
+
+```bash
+npm run build          # bundle dist/ with tsup
+npm run dev            # watch build
+npm start              # run built CLI
+npm run codex-bridge   # run Codex bridge manually
+npm run bridge         # run OpenAI fallback bridge manually
+npm run typecheck      # TypeScript check
+npm test               # Vitest suite
+npm run bump           # patch version without creating a git tag
+```
+
+For local iteration:
+
+```bash
+npm run build
+npm start -- --cwd ~/Projects/my-service --write
+```
 
 ## License
 

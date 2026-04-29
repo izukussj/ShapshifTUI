@@ -1,6 +1,6 @@
 {
   "name": "shapeshiftui",
-  "version": "2.0.1",
+  "version": "2.1.2",
   "description": "Chat-driven TUI where the AI ships React/Ink components that run in a sandbox",
   "type": "module",
   "license": "MIT",
@@ -46,6 +46,7 @@
     "codex-bridge": "node server/codex-bridge.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "bump": "npm version patch --no-git-tag-version",
     "prepublishOnly": "npm run build && npm test"
   },
   "engines": {
