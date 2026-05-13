@@ -8,6 +8,7 @@ import { extractCodeBlock, type SendEvent, type SubmitEvent, type InteractionCon
 import { McpPanel, type McpPanelMode } from './mcp.js';
 import { PluginGuidePanel } from './plugin-guide.js';
 import { SavedViewsPanel } from './saved-state.js';
+import { Landing, LANDING_HINT, type LandingAction } from './landing.js';
 import type { AppError, ApprovalRequest, ChatMessage, InteractionRecord, McpAddPayload, McpOpResult, McpServer, SavedViewSummary, ServerMessage } from './types.js';
 import { onMouse, setMouseEnabled, isMouseEnabled } from './mouse.js';
 
@@ -52,6 +53,9 @@ export function App({ client }: AppProps): React.ReactElement {
   // dot for conditions that persist longer than a single chat entry.
   const [connectionState, setConnectionState] = useState<ConnectionState>('connected');
   const [helpOpen, setHelpOpen] = useState(false);
+  // One-shot cold-start landing card. Hidden permanently after the first
+  // menu pick or Esc. No path back this session — by design.
+  const [landing, setLanding] = useState(true);
   // Native admin overlay that takes over the runtime pane (replaces sandbox
   // source while open). Cleared via the panel's Close button.
   const [adminView, setAdminView] = useState<AdminView | null>(null);
@@ -317,6 +321,33 @@ export function App({ client }: AppProps): React.ReactElement {
     client.send({ type: 'list-views' });
   }, [client]);
 
+  const requestLandingViews = useCallback(() => {
+    setSavedViews(null);
+    setViewsLoading(true);
+    client.send({ type: 'list-views' });
+  }, [client]);
+
+  const onLandingAction = useCallback((action: LandingAction) => {
+    if (action.kind === 'new') {
+      setLanding(false);
+      return;
+    }
+    if (action.kind === 'quit') {
+      exit();
+      return;
+    }
+    if (action.kind === 'load') {
+      setLanding(false);
+      client.send({ type: 'load', name: action.name });
+      return;
+    }
+    if (action.kind === 'fork') {
+      setLanding(false);
+      setViewsLoading(true);
+      client.send({ type: 'fork-view', name: action.name });
+    }
+  }, [client, exit]);
+
   const onSend = useCallback(
     (content: string) => {
       const trimmed = content.trim();
@@ -499,6 +530,17 @@ export function App({ client }: AppProps): React.ReactElement {
   return (
     <Box flexDirection="column" width={stdout.columns} height={stdout.rows}>
       <Header connectionState={connectionState} />
+      {landing ? (
+        <Landing
+          columns={stdout.columns}
+          rows={stdout.rows}
+          focused={landing}
+          views={savedViews}
+          viewsLoading={viewsLoading}
+          onAction={onLandingAction}
+          onRequestViews={requestLandingViews}
+        />
+      ) : (
       <Box flexDirection="row" flexGrow={1}>
         {showChat ? (
           <FocusActiveContext.Provider value={activePane === 'chat' && !pendingApproval}>
@@ -564,8 +606,9 @@ export function App({ client }: AppProps): React.ReactElement {
           </FocusActiveContext.Provider>
         ) : null}
       </Box>
-      {helpOpen ? <CheatsheetModal mouseOn={mouseOn} /> : null}
-      {pendingApproval ? (
+      )}
+      {!landing && helpOpen ? <CheatsheetModal mouseOn={mouseOn} /> : null}
+      {!landing && pendingApproval ? (
         <ApprovalBanner
           request={pendingApproval}
           queued={approvals.length - 1}
@@ -573,10 +616,12 @@ export function App({ client }: AppProps): React.ReactElement {
           onDeny={() => respondToApproval(pendingApproval.id, false)}
         />
       ) : null}
-      <StatusLine status={status} />
+      {!landing ? <StatusLine status={status} /> : null}
       <Box paddingX={1}>
         <Text dimColor>
-          {pendingApproval
+          {landing
+            ? LANDING_HINT
+            : pendingApproval
             ? 'Enter: approve  ·  Tab then Enter: deny  ·  Esc: cancel'
             : helpOpen
               ? 'Esc: close help  ·  Ctrl+K: toggle'
