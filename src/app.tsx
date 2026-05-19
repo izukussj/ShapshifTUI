@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Text, useApp, useInput, useStdout } from 'ink';
+import { Box, Text, useApp, useInput, useStdout, type DOMElement } from 'ink';
 import { Chat } from './chat.js';
 import { Runtime } from './runtime.js';
 import { Client } from './client.js';
@@ -10,7 +10,7 @@ import { PluginGuidePanel } from './plugin-guide.js';
 import { SavedViewsPanel } from './saved-state.js';
 import { Landing, LANDING_HINT, type LandingAction } from './landing.js';
 import type { AppError, ApprovalRequest, ChatMessage, InteractionRecord, McpAddPayload, McpOpResult, McpServer, SavedViewSummary, ServerMessage } from './types.js';
-import { onMouse, setMouseEnabled, isMouseEnabled } from './mouse.js';
+import { onMouse, setMouseEnabled, isMouseEnabled, hitTest } from './mouse.js';
 
 const HISTORY_LIMIT = 50;
 const MAX_RETRIES = 2;
@@ -72,6 +72,8 @@ export function App({ client }: AppProps): React.ReactElement {
   // Chat toggles this when its slash-suggestion menu is open so the app-level
   // Tab handler yields to the chat's Tab-accept behavior.
   const chatCapturesTab = useRef(false);
+  const chatPaneRef = useRef<DOMElement | null>(null);
+  const runtimePaneRef = useRef<DOMElement | null>(null);
 
   const respondToApproval = useCallback(
     (id: string, approved: boolean) => {
@@ -139,7 +141,13 @@ export function App({ client }: AppProps): React.ReactElement {
     return onMouse((e) => {
       const narrowMode = stdout.columns < 80;
       const chatW = narrowMode ? stdout.columns : Math.min(60, Math.floor(stdout.columns * 0.4));
-      const overPane: Pane = narrowMode ? activePane : e.x < chatW ? 'chat' : 'runtime';
+      const overPane: Pane = narrowMode
+        ? activePane
+        : chatPaneRef.current && hitTest(chatPaneRef.current, e.x, e.y)
+          ? 'chat'
+          : runtimePaneRef.current && hitTest(runtimePaneRef.current, e.x, e.y)
+            ? 'runtime'
+            : e.x < chatW ? 'chat' : 'runtime';
 
       if (e.type === 'wheel') {
         if (helpOpen || approvals.length > 0) return;
@@ -529,7 +537,7 @@ export function App({ client }: AppProps): React.ReactElement {
 
   return (
     <Box flexDirection="column" width={stdout.columns} height={stdout.rows}>
-      <Header connectionState={connectionState} />
+      <Header connectionState={connectionState} mouseOn={mouseOn} />
       {landing ? (
         <Landing
           columns={stdout.columns}
@@ -543,22 +551,24 @@ export function App({ client }: AppProps): React.ReactElement {
       ) : (
       <Box flexDirection="row" flexGrow={1}>
         {showChat ? (
-          <FocusActiveContext.Provider value={activePane === 'chat' && !pendingApproval}>
-            <Chat
-              messages={messages}
-              onSend={onSend}
-              focused={activePane === 'chat' && !pendingApproval}
-              scrollOffset={scrollOffset}
-              onScrollOffsetChange={setScrollOffset}
-              width={chatWidth}
-              availableRows={availableRows}
-              captureTabRef={chatCapturesTab}
-            />
-          </FocusActiveContext.Provider>
+          <Box ref={chatPaneRef} width={chatWidth} height={availableRows} flexShrink={0}>
+            <FocusActiveContext.Provider value={activePane === 'chat' && !pendingApproval}>
+              <Chat
+                messages={messages}
+                onSend={onSend}
+                focused={activePane === 'chat' && !pendingApproval}
+                scrollOffset={scrollOffset}
+                onScrollOffsetChange={setScrollOffset}
+                width={chatWidth}
+                availableRows={availableRows}
+                captureTabRef={chatCapturesTab}
+              />
+            </FocusActiveContext.Provider>
+          </Box>
         ) : null}
         {showRuntime ? (
           <FocusActiveContext.Provider value={activePane === 'runtime' && !pendingApproval}>
-            <Box width={runtimeWidth} flexDirection="column" flexShrink={0}>
+            <Box ref={runtimePaneRef} width={runtimeWidth} height={availableRows} flexDirection="column" flexShrink={0}>
               {adminView?.mode === 'plugin' ? (
                 <PluginGuidePanel
                   focused={activePane === 'runtime' && !pendingApproval}
@@ -636,11 +646,12 @@ export function App({ client }: AppProps): React.ReactElement {
 
 interface HeaderProps {
   connectionState: ConnectionState;
+  mouseOn: boolean;
 }
 
 // Thin top bar. Anchors the app identity and hosts the persistent connection
 // dot so the bottom row can stay quiet when nothing is happening.
-function Header({ connectionState }: HeaderProps): React.ReactElement {
+function Header({ connectionState, mouseOn }: HeaderProps): React.ReactElement {
   const dot =
     connectionState === 'reconnecting' ? { color: 'yellow', label: 'reconnecting' } :
     connectionState === 'lost' ? { color: 'red', label: 'connection lost' } :
@@ -652,12 +663,16 @@ function Header({ connectionState }: HeaderProps): React.ReactElement {
         <Text color="cyan" bold>◆ </Text>
         <Text bold>ShapeshifTUI</Text>
       </Box>
-      {dot ? (
-        <Box>
-          <Text color={dot.color} bold>● </Text>
-          <Text color={dot.color}>{dot.label}</Text>
-        </Box>
-      ) : null}
+      <Box>
+        <Text dimColor>mouse {mouseOn ? 'on' : 'off'}</Text>
+        {dot ? (
+          <>
+            <Text dimColor>  ·  </Text>
+            <Text color={dot.color} bold>● </Text>
+            <Text color={dot.color}>{dot.label}</Text>
+          </>
+        ) : null}
+      </Box>
     </Box>
   );
 }
