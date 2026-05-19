@@ -7,11 +7,11 @@
   "author": "Seydina Diop <seydina.laye85@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/izukussj/MoltUI.git"
+    "url": "git+https://github.com/izukussj/ShapeshifTUI.git"
   },
-  "homepage": "https://github.com/izukussj/MoltUI#readme",
+  "homepage": "https://github.com/izukussj/ShapeshifTUI#readme",
   "bugs": {
-    "url": "https://github.com/izukussj/MoltUI/issues"
+    "url": "https://github.com/izukussj/ShapeshifTUI/issues"
   },
   "keywords": [
     "tui",
@@ -47,7 +47,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "bump": "npm version patch --no-git-tag-version",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run typecheck && npm run build && npm test"
   },
   "engines": {
     "node": ">=20.0.0"

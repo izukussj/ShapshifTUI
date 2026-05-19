@@ -11,6 +11,7 @@ export class Client {
   private listeners: Set<Listener> = new Set();
   private ready: Promise<void>;
   private closed = false;
+  private reconnecting = false;
 
   constructor(url: string) {
     this.url = url;
@@ -37,11 +38,28 @@ export class Client {
 
   private connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
-      this.ws.once('open', () => resolve());
-      this.ws.once('error', reject);
+      const ws = new WebSocket(this.url);
+      let opened = false;
+      this.ws = ws;
 
-      this.ws.on('message', (data) => {
+      ws.once('open', () => {
+        opened = true;
+        resolve();
+      });
+      ws.once('error', (err) => {
+        if (!opened) {
+          reject(err);
+          return;
+        }
+        console.error('[shapeshiftui]', {
+          source: 'network',
+          code: 'ws_error',
+          message: 'websocket error after connection opened',
+          err: err instanceof Error ? err.message : String(err),
+        });
+      });
+
+      ws.on('message', (data) => {
         let parsed: ServerMessage;
         try {
           parsed = JSON.parse(data.toString());
@@ -57,13 +75,16 @@ export class Client {
         this.emit(parsed);
       });
 
-      this.ws.on('close', () => {
-        if (!this.closed) this.reconnect();
+      ws.on('close', () => {
+        if (!this.closed && opened) void this.reconnect();
       });
     });
   }
 
   private async reconnect(): Promise<void> {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+
     // One notice at the start of the backoff — not one per attempt. Subsequent
     // retries are silent unless they all fail.
     const firstDelay = RECONNECT_DELAYS[0] ?? 1000;
@@ -75,36 +96,40 @@ export class Client {
       message: `disconnected — reconnecting in ${firstDelay / 1000}s...`,
     });
 
-    for (const delay of RECONNECT_DELAYS) {
-      if (this.closed) return;
-      await new Promise((r) => setTimeout(r, delay));
-      if (this.closed) return;
+    try {
+      for (const delay of RECONNECT_DELAYS) {
+        if (this.closed) return;
+        await new Promise((r) => setTimeout(r, delay));
+        if (this.closed) return;
 
-      try {
-        await this.connect();
-        // Success is not an error — send as a system chat message.
-        this.emitSystem('reconnected');
-        return;
-      } catch (err) {
-        // Transient — the next backoff tick retries. Log for debug; surfacing
-        // every failed attempt would spam the user. If every delay fails we
-        // emit the terminal ws_lost error below.
-        console.error('[shapeshiftui]', {
-          source: 'network',
-          code: 'reconnect_attempt_failed',
-          message: `reconnect after ${delay}ms failed`,
-          err: err instanceof Error ? err.message : String(err),
-        });
+        try {
+          await this.connect();
+          // Success is not an error — send as a system chat message.
+          this.emitSystem('reconnected');
+          return;
+        } catch (err) {
+          // Transient — the next backoff tick retries. Log for debug; surfacing
+          // every failed attempt would spam the user. If every delay fails we
+          // emit the terminal ws_lost error below.
+          console.error('[shapeshiftui]', {
+            source: 'network',
+            code: 'reconnect_attempt_failed',
+            message: `reconnect after ${delay}ms failed`,
+            err: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
-    }
 
-    this.emitError({
-      source: 'network',
-      code: 'ws_lost',
-      severity: 'error',
-      recoverable: false,
-      message: 'connection lost — restart the app',
-    });
+      this.emitError({
+        source: 'network',
+        code: 'ws_lost',
+        severity: 'error',
+        recoverable: false,
+        message: 'connection lost — restart the app',
+      });
+    } finally {
+      this.reconnecting = false;
+    }
   }
 
   async waitForOpen(): Promise<void> {
