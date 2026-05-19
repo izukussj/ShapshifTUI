@@ -62,6 +62,8 @@ npx shapeshiftui --cwd ~/Projects/my-service
 
 On startup, the CLI checks for a bridge on `ws://localhost:8080`. If none is running and no URL was provided, it spawns the Codex bridge automatically. If Codex is unavailable but `OPENAI_API_KEY` is set, it falls back to the OpenAI bridge.
 
+The first thing you see on cold start is a landing card with the ShapeshifTUI wordmark and four entries: **New session**, **Load saved**, **Fork from save**, and **Quit**. Load/Fork open an inline saves browser right on the landing screen — pick a save with `Enter`, or `Esc` back to the menu. Any pick dismisses the landing for the rest of the session.
+
 Connect to an existing bridge:
 
 ```bash
@@ -243,7 +245,8 @@ src/
   runtime-globals.ts  globals exposed to generated components
   components.tsx      Button, Checkbox, Select, Table, Progress
   mcp.tsx             native Codex MCP manager
-  saved-state.tsx     native saved-view browser
+  saved-state.tsx     native saved-view browser (in-app)
+  landing.tsx         cold-start landing card + inline saves browser
   mouse.ts            SGR mouse parser and click/hover hooks
   client.ts           WebSocket client with reconnect
   types.ts            shared wire protocol

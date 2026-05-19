@@ -40,3 +40,7 @@ PLAN.md
 first_spec.md
 debug.log
 2026-*.txt
+
+# Demo bridge — recording/marketing only, not part of the product
+server/demo-bridge.js
+server/demo-script.json
