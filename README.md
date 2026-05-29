@@ -60,7 +60,7 @@ npx shapeshiftui
 npx shapeshiftui --cwd ~/Projects/my-service
 ```
 
-On startup, the CLI checks for a bridge on `ws://localhost:8080`. If none is running and no URL was provided, it spawns the Codex bridge automatically. If Codex is unavailable but `OPENAI_API_KEY` is set, it falls back to the OpenAI bridge.
+On startup, the CLI checks for a bridge on `ws://localhost:8080`. If none is running and no URL was provided, it spawns the Codex bridge automatically. It sends the directory you launched from as Codex's working directory unless you pass `--cwd`. If Codex is unavailable but `OPENAI_API_KEY` is set, it falls back to the OpenAI bridge.
 
 The first thing you see on cold start is a landing card with the ShapeshifTUI wordmark and four entries: **New session**, **Load saved**, **Fork from save**, and **Quit**. Load/Fork open an inline saves browser right on the landing screen — pick a save with `Enter`, or `Esc` back to the menu. Any pick dismisses the landing for the rest of the session.
 

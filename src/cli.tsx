@@ -23,7 +23,7 @@ const SANDBOX_MODES: SandboxMode[] = ['read-only', 'workspace-write', 'danger-fu
 interface CliArgs {
   url: string;
   urlProvided: boolean;
-  cwd: string | null;
+  cwd: string;
   serve: boolean;
   sandbox: SandboxMode | null;
 }
@@ -31,7 +31,7 @@ interface CliArgs {
 function parseArgs(argv: string[]): CliArgs {
   let url = 'ws://localhost:8080';
   let urlProvided = false;
-  let cwd: string | null = null;
+  let cwd = path.resolve(process.cwd());
   let serve = true;
   let sandbox: SandboxMode | null = null;
   const setSandbox = (mode: SandboxMode, flag: string) => {
@@ -64,7 +64,7 @@ function parseArgs(argv: string[]): CliArgs {
       console.log('Launches the TUI. If no URL is given, spawns the Codex bridge on :8080.');
       console.log('');
       console.log('Options:');
-      console.log('  --cwd <path>           run codex with a different working directory');
+      console.log('  --cwd <path>           run codex from this directory (default: current directory)');
       console.log('  --write                allow codex to edit files in the workspace');
       console.log('                         (shorthand for --sandbox workspace-write)');
       console.log('  --sandbox <mode>       set codex sandbox mode explicitly:');
@@ -201,7 +201,7 @@ async function main() {
     process.exit(1);
   }
 
-  if (cwd) client.send({ type: 'init', cwd });
+  client.send({ type: 'init', cwd });
 
   enterAltScreen();
   // Mouse on by default — set SHAPESHIFTUI_MOUSE=0 to disable at launch.
