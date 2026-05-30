@@ -190,7 +190,7 @@ export function Chat({
 
   return (
     <Box
-      borderStyle={focused ? 'bold' : 'round'}
+      borderStyle="round"
       borderColor={focused ? 'cyan' : 'gray'}
       padding={1}
       flexDirection="column"

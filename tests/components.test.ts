@@ -53,4 +53,23 @@ describe('Button', () => {
 
     app.unmount();
   });
+
+  it('does not resize when the label changes after mount', () => {
+    const app = render(React.createElement(Button, {
+      label: 'Go',
+      onPress: () => {},
+    }));
+
+    const firstLines = stripAnsi(app.lastFrame() ?? '').split('\n');
+    app.rerender(React.createElement(Button, {
+      label: 'Running now',
+      onPress: () => {},
+    }));
+    const secondLines = stripAnsi(app.lastFrame() ?? '').split('\n');
+
+    expect(firstLines.map((line) => line.length)).toEqual(secondLines.map((line) => line.length));
+    expect(secondLines.join('\n')).toContain('..');
+
+    app.unmount();
+  });
 });

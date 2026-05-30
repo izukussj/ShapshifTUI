@@ -26,14 +26,13 @@ export function SavedViewsPanel({
   onDelete,
   onClose,
 }: SavedViewsPanelProps): React.ReactElement {
-  const borderStyle = focused ? 'bold' : 'round';
   const borderColor = focused ? 'cyan' : 'gray';
   const rows = views ?? [];
 
   const frameRows = Math.max(5, availableRows);
 
   return (
-    <Box borderStyle={borderStyle} borderColor={borderColor} padding={1} flexDirection="column" flexGrow={1} height={frameRows} overflowY="hidden">
+    <Box borderStyle="round" borderColor={borderColor} padding={1} flexDirection="column" flexGrow={1} height={frameRows} overflowY="hidden">
       <Box>
         <Text bold color="cyan">◆ Saves</Text>
         <Text dimColor>

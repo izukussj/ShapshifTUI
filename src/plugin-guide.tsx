@@ -8,11 +8,10 @@ interface PluginGuidePanelProps {
 }
 
 export function PluginGuidePanel({ focused, onClose }: PluginGuidePanelProps): React.ReactElement {
-  const borderStyle = focused ? 'bold' : 'round';
   const borderColor = focused ? 'cyan' : 'gray';
 
   return (
-    <Box borderStyle={borderStyle} borderColor={borderColor} padding={1} flexDirection="column" flexGrow={1}>
+    <Box borderStyle="round" borderColor={borderColor} padding={1} flexDirection="column" flexGrow={1}>
       <Box>
         <Text bold color="cyan">◆ Codex plugins</Text>
         <Text dimColor>  ·  configure in Codex</Text>

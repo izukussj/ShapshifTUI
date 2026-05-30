@@ -17,6 +17,7 @@ interface RuntimeProps {
   focused: boolean;
   scrollOffset: number;
   availableRows: number;
+  availableColumns: number;
   onCompileError: (error: AppError) => void;
 }
 
@@ -28,6 +29,7 @@ export function Runtime({
   focused,
   scrollOffset,
   availableRows,
+  availableColumns,
   onCompileError,
 }: RuntimeProps): React.ReactElement {
   const focusedRef = useRef(focused);
@@ -84,15 +86,16 @@ export function Runtime({
     }
   }, [compiled, onCompileError]);
 
-  const borderStyle = focused ? 'bold' : 'round';
   const borderColor = focused ? 'cyan' : 'gray';
   const frameRows = Math.max(5, availableRows);
+  const frameColumns = Math.max(20, availableColumns);
+  const viewportColumns = Math.max(1, frameColumns - 4);
   const hintRows = source && scrollOffset > 0 ? 1 : 0;
   const viewportRows = Math.max(1, frameRows - 4 - hintRows);
 
   if (!source) {
     return (
-      <Box borderStyle={borderStyle} borderColor={borderColor} padding={1} flexDirection="column" flexGrow={1} height={frameRows}>
+      <Box borderStyle="round" borderColor={borderColor} padding={1} flexDirection="column" flexGrow={1} width={frameColumns} height={frameRows} overflowX="hidden" overflowY="hidden">
         <Box flexDirection="column" paddingY={1}>
           <Text bold color="cyan">◆ Component canvas</Text>
           <Text dimColor>Nothing mounted yet. Ask the assistant in the chat pane on the left</Text>
@@ -111,7 +114,7 @@ export function Runtime({
 
   if (compiled && !compiled.ok) {
     return (
-      <Box borderStyle={borderStyle} borderColor="red" padding={1} flexDirection="column" flexGrow={1} height={frameRows}>
+      <Box borderStyle="round" borderColor="red" padding={1} flexDirection="column" flexGrow={1} width={frameColumns} height={frameRows} overflowX="hidden" overflowY="hidden">
         <Text color="red" bold>✗ Compile error</Text>
         <Text>{compiled.error}</Text>
       </Box>
@@ -122,7 +125,7 @@ export function Runtime({
 
   const Component = compiled.Component;
   return (
-    <Box borderStyle={borderStyle} borderColor={borderColor} padding={1} flexDirection="column" flexGrow={1} height={frameRows}>
+    <Box borderStyle="round" borderColor={borderColor} padding={1} flexDirection="column" flexGrow={1} width={frameColumns} height={frameRows} overflowX="hidden" overflowY="hidden">
       {scrollOffset > 0 ? (
         <Box>
           <Text color="yellow" dimColor>
@@ -130,9 +133,9 @@ export function Runtime({
           </Text>
         </Box>
       ) : null}
-      <Box height={viewportRows} overflowY="hidden" flexDirection="column">
+      <Box width={viewportColumns} height={viewportRows} overflowX="hidden" overflowY="hidden" flexDirection="column" flexShrink={0}>
         <RuntimeErrorBoundary key={source} onError={onRenderError}>
-          <Box flexDirection="column" flexShrink={0} marginTop={scrollOffset > 0 ? -scrollOffset : 0}>
+          <Box width={viewportColumns} flexDirection="column" flexShrink={0} marginTop={scrollOffset > 0 ? -scrollOffset : 0}>
             <Component sendEvent={sendEvent} submitEvent={submitEvent} context={context} />
           </Box>
         </RuntimeErrorBoundary>

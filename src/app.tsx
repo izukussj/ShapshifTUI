@@ -609,6 +609,7 @@ export function App({ client }: AppProps): React.ReactElement {
                   focused={activePane === 'runtime' && !pendingApproval}
                   scrollOffset={runtimeScrollOffset}
                   availableRows={availableRows}
+                  availableColumns={runtimeWidth}
                   onCompileError={onCompileError}
                 />
               )}
@@ -627,7 +628,7 @@ export function App({ client }: AppProps): React.ReactElement {
         />
       ) : null}
       {!landing ? <StatusLine status={status} /> : null}
-      <Box paddingX={1}>
+      <Box height={1} paddingX={1} overflowX="hidden" overflowY="hidden">
         <Text dimColor>
           {landing
             ? LANDING_HINT
@@ -658,7 +659,7 @@ function Header({ connectionState, mouseOn }: HeaderProps): React.ReactElement {
     null;
 
   return (
-    <Box paddingX={1} justifyContent="space-between">
+    <Box height={1} paddingX={1} justifyContent="space-between" overflowX="hidden" overflowY="hidden">
       <Box>
         <Text color="cyan" bold>◆ </Text>
         <Text bold>ShapeshifTUI</Text>
@@ -697,9 +698,9 @@ interface StatusLineProps {
 // Transient turn activity only. Persistent connection state lives in the
 // Header, so this row is free to stay empty when nothing is happening.
 function StatusLine({ status }: StatusLineProps): React.ReactElement {
-  if (!status) return <Box minHeight={1} />;
+  if (!status) return <Box height={1} overflowY="hidden" />;
   return (
-    <Box paddingX={1}>
+    <Box height={1} paddingX={1} overflowX="hidden" overflowY="hidden">
       <Spinner />
       <Text> </Text>
       <Text dimColor italic>{status}</Text>

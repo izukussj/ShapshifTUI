@@ -22,6 +22,7 @@ export function Button({ label, onPress, autoFocus, width, minWidth, maxWidth }:
   const isActive = useContext(FocusActiveContext);
   const { isFocused } = useFocus({ autoFocus, isActive });
   const ref = useRef<DOMElement | null>(null);
+  const implicitWidthRef = useRef<number | null>(null);
   const hovered = useMouseHover(ref);
   useMouseClick(ref, () => { if (isActive) onPress(); });
 
@@ -37,7 +38,11 @@ export function Button({ label, onPress, autoFocus, width, minWidth, maxWidth }:
   const naturalWidth = Math.min(labelCells, MAX_BUTTON_LABEL_CELLS) + 4;
   const requestedWidth = width ?? Math.max(naturalWidth, minWidth ?? 0);
   const boundedWidth = maxWidth === undefined ? requestedWidth : Math.min(requestedWidth, maxWidth);
-  const frameWidth = Math.max(4, Math.floor(boundedWidth));
+  const computedWidth = Math.max(4, Math.floor(boundedWidth));
+  if (width === undefined && implicitWidthRef.current === null) {
+    implicitWidthRef.current = computedWidth;
+  }
+  const frameWidth = width === undefined ? implicitWidthRef.current ?? computedWidth : computedWidth;
   const renderedLabel = truncateCells(label, Math.max(0, frameWidth - 4));
 
   return (

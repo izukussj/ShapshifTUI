@@ -41,11 +41,10 @@ export function McpPanel(props: McpPanelProps): React.ReactElement {
     if (lastOp?.ok) setMode('list');
   }, [lastOp]);
 
-  const borderStyle = focused ? 'bold' : 'round';
   const borderColor = focused ? 'cyan' : 'gray';
 
   return (
-    <Box borderStyle={borderStyle} borderColor={borderColor} padding={1} flexDirection="column" flexGrow={1}>
+    <Box borderStyle="round" borderColor={borderColor} padding={1} flexDirection="column" flexGrow={1}>
       <Box>
         <Text bold color="cyan">◆ MCP servers</Text>
         <Text dimColor>  ·  managed via codex mcp</Text>
