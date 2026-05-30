@@ -13,9 +13,12 @@ interface ButtonProps {
   label: string;
   onPress: () => void;
   autoFocus?: boolean;
+  width?: number;
+  minWidth?: number;
+  maxWidth?: number;
 }
 
-export function Button({ label, onPress, autoFocus }: ButtonProps): React.ReactElement {
+export function Button({ label, onPress, autoFocus, width, minWidth, maxWidth }: ButtonProps): React.ReactElement {
   const isActive = useContext(FocusActiveContext);
   const { isFocused } = useFocus({ autoFocus, isActive });
   const ref = useRef<DOMElement | null>(null);
@@ -30,8 +33,12 @@ export function Button({ label, onPress, autoFocus }: ButtonProps): React.ReactE
   });
 
   const active = (isFocused || hovered) && isActive;
-  const labelCells = Array.from(label).length;
-  const width = Math.max(4, Math.min(labelCells, MAX_BUTTON_LABEL_CELLS) + 4);
+  const labelCells = stringWidth(label);
+  const naturalWidth = Math.min(labelCells, MAX_BUTTON_LABEL_CELLS) + 4;
+  const requestedWidth = width ?? Math.max(naturalWidth, minWidth ?? 0);
+  const boundedWidth = maxWidth === undefined ? requestedWidth : Math.min(requestedWidth, maxWidth);
+  const frameWidth = Math.max(4, Math.floor(boundedWidth));
+  const renderedLabel = truncateCells(label, Math.max(0, frameWidth - 4));
 
   return (
     <Box
@@ -40,10 +47,67 @@ export function Button({ label, onPress, autoFocus }: ButtonProps): React.ReactE
       borderColor={active ? 'cyan' : 'gray'}
       paddingX={1}
       flexShrink={0}
-      width={width}
+      width={frameWidth}
     >
-      <Text inverse={isFocused} bold={hovered && !isFocused} wrap="truncate-end">{label}</Text>
+      <Text inverse={isFocused} bold={hovered && !isFocused} wrap="truncate-end">{renderedLabel}</Text>
     </Box>
+  );
+}
+
+function stringWidth(value: string): number {
+  let width = 0;
+  for (const char of value) {
+    const codePoint = char.codePointAt(0) ?? 0;
+    if (isCombining(codePoint)) continue;
+    width += isWide(codePoint) ? 2 : 1;
+  }
+  return width;
+}
+
+function truncateCells(value: string, maxCells: number): string {
+  if (stringWidth(value) <= maxCells) return value;
+  if (maxCells <= 0) return '';
+
+  const suffix = '.'.repeat(Math.min(3, maxCells));
+  const budget = maxCells - suffix.length;
+  let used = 0;
+  let output = '';
+
+  for (const char of value) {
+    const codePoint = char.codePointAt(0) ?? 0;
+    const cells = isCombining(codePoint) ? 0 : isWide(codePoint) ? 2 : 1;
+    if (used + cells > budget) break;
+    output += char;
+    used += cells;
+  }
+
+  return output + suffix;
+}
+
+function isCombining(codePoint: number): boolean {
+  return (
+    (codePoint >= 0x0300 && codePoint <= 0x036f) ||
+    (codePoint >= 0x1ab0 && codePoint <= 0x1aff) ||
+    (codePoint >= 0x1dc0 && codePoint <= 0x1dff) ||
+    (codePoint >= 0x20d0 && codePoint <= 0x20ff) ||
+    (codePoint >= 0xfe20 && codePoint <= 0xfe2f)
+  );
+}
+
+function isWide(codePoint: number): boolean {
+  return (
+    codePoint >= 0x1100 && (
+      codePoint <= 0x115f ||
+      codePoint === 0x2329 ||
+      codePoint === 0x232a ||
+      (codePoint >= 0x2e80 && codePoint <= 0xa4cf && codePoint !== 0x303f) ||
+      (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
+      (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
+      (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
+      (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
+      (codePoint >= 0xff00 && codePoint <= 0xff60) ||
+      (codePoint >= 0xffe0 && codePoint <= 0xffe6)
+    )
   );
 }
 
